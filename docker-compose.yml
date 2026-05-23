@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./exam-server-backend
+      dockerfile: Dockerfile
+    image: exam-backend:latest
+    container_name: exam-backend
+    restart: unless-stopped
+    env_file:
+      - ./exam-server-backend/.env
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./data/exam.db:/app/exam.db
+      - ./data/uploads:/app/uploads
+      - ./data/logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend-admin
+      dockerfile: Dockerfile
+    image: exam-frontend:latest
+    container_name: exam-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes: {}

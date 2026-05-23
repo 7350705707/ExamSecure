@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src http: https:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ExamBrowser</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ── Login Screen ─────────────────────────────────────────────────────── -->
+<div id="login-screen" class="screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+      </svg>
+    </div>
+    <h1 class="login-title">ExamBrowser</h1>
+    <p class="login-subtitle">Secure Exam Delivery System</p>
+    <div id="login-error" class="error-msg hidden"></div>
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input id="username" type="text" placeholder="Enter your username" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input id="password" type="password" placeholder="Enter your password" autocomplete="off" />
+    </div>
+    <button id="login-btn" class="btn-primary">Login</button>
+    <button id="exit-btn" class="btn-exit">Exit</button>
+
+    <!-- Server URL configurator — collapsed by default -->
+    <details id="server-settings" class="server-settings">
+      <summary class="server-settings-toggle">
+        ⚙ Server: <span id="server-url-display" class="server-url-pill">—</span>
+      </summary>
+      <div class="server-settings-body">
+        <div class="form-group">
+          <label for="server-url-input">Backend URL</label>
+          <input id="server-url-input" type="text" placeholder="http://192.168.1.100:8001" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="server-settings-actions">
+          <button id="server-url-apply" class="btn-server-apply">Apply</button>
+          <button id="server-url-reset" class="btn-server-reset">Reset to Default</button>
+        </div>
+        <p id="server-url-status" class="server-url-status hidden"></p>
+      </div>
+    </details>
+  </div>
+</div>
+
+<!-- ── Exam Select Screen ─────────────────────────────────────────────────── -->
+<div id="exam-select-screen" class="screen hidden">
+  <div class="login-card">
+    <div class="login-logo">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+      </svg>
+    </div>
+    <h1 class="login-title">Select Exam</h1>
+    <p class="login-subtitle" id="select-welcome"></p>
+    <div id="exam-list" class="exam-list"></div>
+    <button id="back-btn" class="btn-exit" style="margin-top:1rem">Back to Login</button>
+  </div>
+</div>
+
+<!-- ── Exam Screen ───────────────────────────────────────────────────────── -->
+<div id="exam-screen" class="screen hidden">
+  <!-- Sidebar: question navigator -->
+  <aside class="exam-sidebar">
+    <div class="sidebar-header">
+      <span id="sidebar-title" class="sidebar-exam-title">Exam</span>
+    </div>
+    <div class="sidebar-student">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
+      </svg>
+      <span id="sidebar-student"></span>
+    </div>
+    <nav id="question-nav" class="question-nav"></nav>
+    <div class="sidebar-footer">
+      <div class="legend-item"><span class="dot dot-answered"></span> Answered</div>
+      <div class="legend-item"><span class="dot dot-unanswered"></span> Unanswered</div>
+      <div class="legend-item"><span class="dot dot-current"></span> Current</div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="exam-main">
+    <!-- Status bar / timer -->
+    <header class="exam-header">
+      <div class="header-left">
+        <span id="header-title" class="header-exam-title"></span>
+        <span id="question-counter" class="question-counter"></span>
+      </div>
+      <div class="timer-wrap" id="timer-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
+        <span id="timer" class="timer-text">--:--</span>
+      </div>
+    </header>
+
+    <!-- Question card -->
+    <div class="question-area">
+      <div class="question-card" id="question-card">
+        <div class="question-meta">
+          <span id="q-type-badge" class="type-badge"></span>
+          <span id="q-marks" class="marks-badge"></span>
+        </div>
+        <p id="q-text" class="q-text"></p>
+        <div id="q-options" class="q-options hidden"></div>
+        <div id="q-tf" class="q-tf hidden">
+          <button class="tf-btn" data-val="True">True</button>
+          <button class="tf-btn" data-val="False">False</button>
+        </div>
+        <textarea id="q-textarea" class="q-textarea hidden" placeholder="Type your answer here…" rows="5"></textarea>
+      </div>
+    </div>
+
+    <!-- Navigation bar -->
+    <footer class="exam-footer">
+      <button id="prev-btn" class="btn-nav" disabled>← Previous</button>
+      <div class="footer-center">
+        <span id="answered-count" class="answered-label"></span>
+      </div>
+      <button id="next-btn" class="btn-nav">Next →</button>
+      <button id="submit-btn" class="btn-submit hidden">Submit Exam</button>
+    </footer>
+  </main>
+</div>
+
+<!-- ── Result Screen ─────────────────────────────────────────────────────── -->
+<div id="result-screen" class="screen hidden">
+  <div class="result-card">
+    <div id="result-icon" class="result-icon"></div>
+    <h2 id="result-title" class="result-title"></h2>
+    <div id="result-score" class="result-score"></div>
+    <p id="result-pct" class="result-pct"></p>
+    <div class="result-actions">
+      <button id="result-back-btn" class="btn-exit hidden">← Back to Exam List</button>
+      <button id="result-exit-btn" class="btn-primary">Exit Browser</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Confirm Modal (body-level so it overlays any screen) ──────────────── -->
+<div id="confirm-overlay" class="confirm-overlay hidden">
+  <div class="confirm-box">
+    <p id="confirm-msg" class="confirm-msg"></p>
+    <div class="confirm-actions">
+      <button id="confirm-ok"     class="btn-primary" style="width:auto;padding:0.6rem 2rem">Yes, Submit</button>
+      <button id="confirm-cancel" class="btn-exit"    style="width:auto;padding:0.6rem 2rem">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Global Error Toast ─────────────────────────────────────────────────── -->
+<div id="error-toast" class="error-toast hidden">
+  <div class="error-toast-header">
+    <span class="error-toast-icon">⚠</span>
+    <strong id="error-toast-title">Error</strong>
+    <button id="error-toast-close" class="error-toast-close">✕</button>
+  </div>
+  <pre id="error-toast-body" class="error-toast-body"></pre>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
