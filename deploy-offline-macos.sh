@@ -25,11 +25,9 @@ command -v docker-compose >/dev/null 2>&1 || {
     exit 1
 }
 
-echo "==> Loading Docker images..."
-for tar in exam-backend.tar exam-frontend.tar; do
-    [[ -f "$tar" ]] || { echo "ERROR: Missing $tar"; exit 1; }
-    docker load -i "$tar"
-done
+echo "==> Loading Docker image..."
+[[ -f "exam-app.tar" ]] || { echo "ERROR: Missing exam-app.tar"; exit 1; }
+docker load -i exam-app.tar
 
 # Create .env if missing
 if [[ ! -f .env && -f .env.example ]]; then

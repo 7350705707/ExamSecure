@@ -1,10 +1,10 @@
 import React from 'react';
 
 const TYPE_COLORS = {
-  mcq:          'bg-indigo-100 text-indigo-600 border-indigo-200',
-  true_false:   'bg-sky-100 text-sky-600 border-sky-200',
-  fill_blank:   'bg-amber-100 text-amber-700 border-amber-200',
-  short_answer: 'bg-violet-100 text-violet-600 border-violet-200',
+  mcq:                      'bg-indigo-100 text-indigo-600 border-indigo-200',
+  true_false:               'bg-sky-100 text-sky-600 border-sky-200',
+  fill_blank:               'bg-amber-100 text-amber-700 border-amber-200',
+  short_answer:             'bg-violet-100 text-violet-600 border-violet-200',
 };
 
 export default function QuestionCard({ question: q, index, onEdit, onDelete }) {

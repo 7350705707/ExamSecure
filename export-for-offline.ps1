@@ -15,17 +15,22 @@ $Root      = $PSScriptRoot
 $OutDir    = Join-Path $Root "offline-bundle"
 $ZipPath   = Join-Path $Root "exam-system-offline.zip"
 
-Write-Host "==> Building Docker images..." -ForegroundColor Cyan
-docker build -t exam-backend:latest  (Join-Path $Root "exam-server-backend")
-docker build -t exam-frontend:latest (Join-Path $Root "frontend-admin")
+Write-Host "==> Building frontend (Vite)..." -ForegroundColor Cyan
+Push-Location (Join-Path $Root "frontend-admin")
+$env:VITE_BASE = '/admin/'
+npm run build
+Pop-Location
+Remove-Item Env:VITE_BASE -ErrorAction SilentlyContinue
+
+Write-Host "==> Building combined Docker image..." -ForegroundColor Cyan
+docker build -t exam-app:latest $Root
 
 Write-Host "==> Creating output directory: $OutDir" -ForegroundColor Cyan
 if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force }
 New-Item -ItemType Directory -Path $OutDir | Out-Null
 
-Write-Host "==> Saving images to .tar files..." -ForegroundColor Cyan
-docker save exam-backend:latest  | Out-File -FilePath (Join-Path $OutDir "exam-backend.tar")  -Encoding Byte
-docker save exam-frontend:latest | Out-File -FilePath (Join-Path $OutDir "exam-frontend.tar") -Encoding Byte
+Write-Host "==> Saving image to .tar file..." -ForegroundColor Cyan
+docker save -o (Join-Path $OutDir "exam-app.tar") exam-app:latest
 
 Write-Host "==> Copying deployment files..." -ForegroundColor Cyan
 Copy-Item (Join-Path $Root "docker-compose.yml")                      (Join-Path $OutDir "docker-compose.yml")

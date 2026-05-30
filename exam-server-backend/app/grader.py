@@ -40,7 +40,14 @@ def grade_answer(
     elif q_type == "fill_blank":
         return _grade_fuzzy(sa, ak, marks)
     elif q_type == "short_answer":
+        # If the answer looks like an uploaded screenshot filename (uuid.ext), grade manually
+        import re
+        if re.match(r'^[0-9a-f\-]{36}\.(png|jpg|jpeg|gif|webp|bmp)$', sa, re.IGNORECASE):
+            return 0.0, "Pending manual review (screenshot)."
         return _grade_llm(sa, ak, marks, rubric)
+    elif q_type == "short_answer_screenshot":
+        # Legacy type — treat same as screenshot short answer
+        return 0.0, "Pending manual review."
     else:
         logger.warning("Unknown question type %s — skipping grade", q_type)
         return 0.0, "Unknown question type"

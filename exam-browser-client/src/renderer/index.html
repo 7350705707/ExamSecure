@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src http: https:;" />
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src http: https:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ExamBrowser</title>
   <link rel="stylesheet" href="style.css" />
@@ -14,9 +14,7 @@
 <div id="login-screen" class="screen">
   <div class="login-card">
     <div class="login-logo">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-      </svg>
+      <img src="MCTE_logo.png" alt="MCTE Logo" class="login-logo-img" />
     </div>
     <h1 class="login-title">ExamBrowser</h1>
     <p class="login-subtitle">Secure Exam Delivery System</p>
@@ -35,7 +33,8 @@
     <!-- Server URL configurator — collapsed by default -->
     <details id="server-settings" class="server-settings">
       <summary class="server-settings-toggle">
-        ⚙ Server: <span id="server-url-display" class="server-url-pill">—</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:4px"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+        Server: <span id="server-url-display" class="server-url-pill">—</span>
       </summary>
       <div class="server-settings-body">
         <div class="form-group">
@@ -51,18 +50,46 @@
     </details>
   </div>
 </div>
-
+<!-- ── Pre-Exam Instructions Screen ────────────────────────────────────── -->
+<div id="exam-instructions-screen" class="screen hidden">
+  <div class="instructions-card">
+    <div class="instructions-header">
+      <svg class="instr-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+      </svg>
+      <div>
+        <h2 class="instr-title">Important Instructions</h2>
+        <p class="instr-subtitle">Read carefully before starting the exam</p>
+      </div>
+    </div>
+    <ol class="instr-list">
+      <li>Your attention is drawn to <strong>Para 28 of SAO 2/S/85</strong> against use of unfair means.</li>
+      <li><strong>Mobile Phones, Digital Watches and any other Communication Devices</strong> are not permitted during the exam.</li>
+      <li>Make sure that your answer sheet has been <strong>initialled by the Instructor</strong>, failing which, the sheet will be considered as invalid.</li>
+    </ol>
+    <label class="instr-accept-row">
+      <input type="checkbox" id="instr-accept-chk" class="instr-chk" />
+      <span>I have read and understood the above instructions.</span>
+    </label>
+    <div class="instr-actions">
+      <button id="instr-cancel-btn" class="btn-exit">&#8592; Back</button>
+      <button id="instr-start-btn" class="btn-primary" disabled>Start Exam</button>
+    </div>
+  </div>
+</div>
 <!-- ── Exam Select Screen ─────────────────────────────────────────────────── -->
 <div id="exam-select-screen" class="screen hidden">
   <div class="login-card">
     <div class="login-logo">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-      </svg>
+      <img src="MCTE_logo.png" alt="MCTE Logo" class="login-logo-img" />
     </div>
     <h1 class="login-title">Select Exam</h1>
     <p class="login-subtitle" id="select-welcome"></p>
     <div id="exam-list" class="exam-list"></div>
+
+    <!-- Released results section — shown after exams list when there are released results -->
+    <div id="released-results" class="released-results hidden"></div>
+
     <button id="back-btn" class="btn-exit" style="margin-top:1rem">Back to Login</button>
   </div>
 </div>
@@ -85,11 +112,15 @@
       <div class="legend-item"><span class="dot dot-answered"></span> Answered</div>
       <div class="legend-item"><span class="dot dot-unanswered"></span> Unanswered</div>
       <div class="legend-item"><span class="dot dot-current"></span> Current</div>
+      <div class="legend-item"><span class="dot dot-review"></span> Marked</div>
     </div>
   </aside>
 
   <!-- Main content -->
   <main class="exam-main">
+    <!-- Timer warning banner — shown 5 min and 1 min before end -->
+    <div id="timer-warning-banner" class="timer-warning-banner hidden"></div>
+
     <!-- Status bar / timer -->
     <header class="exam-header">
       <div class="header-left">
@@ -110,6 +141,7 @@
         <div class="question-meta">
           <span id="q-type-badge" class="type-badge"></span>
           <span id="q-marks" class="marks-badge"></span>
+          <button id="mark-review-btn" class="review-btn">&#9734; Mark for Review</button>
         </div>
         <p id="q-text" class="q-text"></p>
         <div id="q-options" class="q-options hidden"></div>
@@ -118,6 +150,20 @@
           <button class="tf-btn" data-val="False">False</button>
         </div>
         <textarea id="q-textarea" class="q-textarea hidden" placeholder="Type your answer here…" rows="5"></textarea>
+        <div id="q-fill-wrap" class="hidden">
+          <input id="q-fill-input" type="text" class="q-fill-input" placeholder="Type your answer…" autocomplete="off" />
+          <div id="q-hint-panel" class="q-hint-panel hidden"></div>
+        </div>
+        <div id="q-screenshot" class="q-screenshot hidden">
+          <div class="screenshot-upload-area">
+            <label style="display:block;margin-bottom:0.5rem;font-size:0.9rem;color:var(--text-secondary);">
+              Upload a screenshot of your answer:
+            </label>
+            <input type="file" class="ss-file-input" accept="image/*" />
+          </div>
+          <img class="ss-preview hidden" alt="Preview" />
+          <span class="ss-status"></span>
+        </div>
       </div>
     </div>
 
@@ -147,6 +193,37 @@
   </div>
 </div>
 
+<!-- ── Change Password Screen (forced on first login) ────────────────────── -->
+<div id="change-password-screen" class="screen hidden">
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="MCTE_logo.png" alt="MCTE Logo" class="login-logo-img" />
+    </div>
+    <h1 class="login-title">Change Password</h1>
+    <p class="login-subtitle">You must set a new password before continuing.</p>
+    <div id="cp-error" class="error-msg hidden"></div>
+    <div class="form-group">
+      <label for="cp-new1">New Password</label>
+      <input id="cp-new1" type="password" placeholder="At least 8 characters" autocomplete="new-password" />
+    </div>
+    <div class="form-group">
+      <label for="cp-new2">Confirm New Password</label>
+      <input id="cp-new2" type="password" placeholder="Repeat new password" autocomplete="new-password" />
+    </div>
+    <button id="cp-submit-btn" class="btn-primary">Change Password</button>
+  </div>
+</div>
+
+<!-- ── Review Screen (student views their paper after result release) ──────── -->
+<div id="review-screen" class="screen hidden">
+  <div class="review-wrapper">
+    <div id="review-content" class="review-content"></div>
+    <div class="review-footer">
+      <button id="review-back-btn" class="btn-exit">← Back to Exam List</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Confirm Modal (body-level so it overlays any screen) ──────────────── -->
 <div id="confirm-overlay" class="confirm-overlay hidden">
   <div class="confirm-box">
@@ -161,11 +238,13 @@
 <!-- ── Global Error Toast ─────────────────────────────────────────────────── -->
 <div id="error-toast" class="error-toast hidden">
   <div class="error-toast-header">
-    <span class="error-toast-icon">⚠</span>
+    <span class="error-toast-icon">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+    </span>
     <strong id="error-toast-title">Error</strong>
-    <button id="error-toast-close" class="error-toast-close">✕</button>
-  </div>
-  <pre id="error-toast-body" class="error-toast-body"></pre>
+    <button id="error-toast-close" class="error-toast-close">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
 </div>
 
 <script src="app.js"></script>

@@ -29,6 +29,10 @@ exam-browser-client/out/
 # Vite / React production build
 frontend-admin/dist/
 
+#offline bundle 
+offline-bundle/
+exam-system-offline.zip
+
 # ── Environment / secrets ─────────────────────────────────────────────────────
 .env
 .env.local

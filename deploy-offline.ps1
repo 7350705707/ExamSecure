@@ -23,15 +23,13 @@ function Require-Command($cmd) {
 Require-Command docker
 Require-Command docker-compose
 
-Write-Host "==> Loading Docker images..." -ForegroundColor Cyan
-foreach ($tar in @("exam-backend.tar", "exam-frontend.tar")) {
-    $path = Join-Path $Root $tar
-    if (-not (Test-Path $path)) {
-        Write-Error "Missing image archive: $path"
-        exit 1
-    }
-    docker load -i $path
+Write-Host "==> Loading Docker image..." -ForegroundColor Cyan
+$path = Join-Path $Root "exam-app.tar"
+if (-not (Test-Path $path)) {
+    Write-Error "Missing image archive: $path"
+    exit 1
 }
+docker load -i $path
 
 # Create .env if it doesn't exist
 $EnvFile = Join-Path $Root ".env"

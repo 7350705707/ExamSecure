@@ -17,14 +17,20 @@ export async function uploadParseExam(file) {
 }
 
 // ── Results ───────────────────────────────────────────────────────────────────
-export const listResults = (examId) => request('GET', `/api/admin/results${examId ? `?exam_id=${examId}` : ''}`);
-export const getResult   = (id)     => request('GET', `/api/exam/result/${id}`);
+export const listResults      = (examId)     => request('GET', `/api/admin/results${examId ? `?exam_id=${examId}` : ''}`);
+export const getResult        = (id)         => request('GET', `/api/exam/result/${id}`);
+export const reviewSession    = (id)         => request('GET', `/api/admin/results/${id}/review`);
+export const updateAnswerScore = (sessionId, questionId, score) =>
+  request('PUT', `/api/admin/results/${sessionId}/answers/${encodeURIComponent(questionId)}/score`, { score });
+export const releaseResult       = (sessionId)         => request('POST', `/api/admin/results/${sessionId}/release`);
+export const releaseGroupResults = (examId, groupId)   => request('POST', `/api/admin/results/release-group?exam_id=${examId}&group_id=${groupId}`);
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 export const listUsers        = ()           => request('GET', '/api/admin/users');
 export const createUser       = (body)       => request('POST', '/api/admin/users', body);
 export const deleteUser       = (id)         => request('DELETE', `/api/admin/users/${id}`);
 export const assignUserGroup  = (uid, gid)   => request('PUT', `/api/admin/users/${uid}/group`, { group_id: gid });
+export const bulkImportUsers  = (users)      => request('POST', '/api/admin/users/bulk-import', { users });
 
 // ── Groups ────────────────────────────────────────────────────────────────────
 export const listGroups  = ()       => request('GET', '/api/admin/groups');

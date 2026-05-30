@@ -8,9 +8,13 @@ let token       = "";
 let currentUser = null;
 let examData    = null;   // { session_id, exam_id, title, duration_minutes, questions[] }
 let answers     = {};     // { [question_id]: string }
+let markedForReview = {}; // { [question_id]: bool }
 let currentIdx  = 0;
 let timerInterval = null;
 let secondsLeft   = 0;
+let autoSaveInterval = null;  // for periodic answer auto-save
+let _warned5min = false;      // timer warning flags
+let _warned1min = false;
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Screens
@@ -18,8 +22,9 @@ let secondsLeft   = 0;
 const $ = (id) => document.getElementById(id);
 
 function showScreen(name) {
-  ["login-screen", "exam-select-screen", "exam-screen", "result-screen"].forEach((id) => {
-    document.getElementById(id).classList.toggle("hidden", id !== name);
+  ["login-screen", "change-password-screen", "exam-instructions-screen", "exam-select-screen", "exam-screen", "result-screen", "review-screen"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle("hidden", id !== name);
   });
 }
 
@@ -89,7 +94,7 @@ async function api(method, path, body = null, auth = false) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (networkErr) {
-    const err = new Error(`Network error â€” could not reach server.\n${networkErr.message}`);
+    const err = new Error(`Network error — could not reach server.\n${networkErr.message}`);
     err.status = 0;
     throw err;
   }
@@ -111,6 +116,15 @@ async function api(method, path, body = null, auth = false) {
     const detail = typeof data === "object" ? (data.detail || JSON.stringify(data)) : data;
     const err = new Error(detail || `Request failed (HTTP ${res.status})`);
     err.status = res.status;
+    // Handle session displacement (another login invalidated this token)
+    if (res.status === 401 && typeof detail === "string" && detail.includes("SESSION_DISPLACED")) {
+      token = "";
+      currentUser = null;
+      stopAutoSave();
+      clearInterval(timerInterval);
+      showError("Logged Out", "Your account was logged in on another device. Please log in again.");
+      setTimeout(() => showScreen("login-screen"), 2500);
+    }
     throw err;
   }
   return data;
@@ -126,7 +140,7 @@ async function handleLogin() {
 
   errEl.classList.add("hidden");
   $("login-btn").disabled = true;
-  $("login-btn").textContent = "Connectingâ€¦";
+  $("login-btn").textContent = "Connecting…";
 
   try {
     if (!username || !password) throw new Error("Username and password are required.");
@@ -136,14 +150,29 @@ async function handleLogin() {
     token = auth.access_token;
     currentUser = auth.user;
 
+    // Force password change on first login (bulk-imported students)
+    if (auth.user.must_change_password) {
+      showChangePasswordScreen();
+      return;
+    }
+
     // Fetch published exams
     const exams = await api("GET", "/api/exam/available", null, true);
     if (!exams || exams.length === 0)
-      throw new Error("No exams are currently available. Please contact your invigilator.");
+      throw new Error("No exams are currently available. Please contact your Instructor.");
 
     if (exams.length === 1) {
-      // Auto-start the only available exam
-      await startExam(exams[0].id);
+      // Auto-start only if the student has no released results to view
+      let hasReleased = false;
+      try {
+        const myResults = await api("GET", "/api/exam/my-results", null, true);
+        hasReleased = myResults && myResults.some((r) => r.result_released);
+      } catch (_) {}
+      if (hasReleased) {
+        showExamSelect(exams);
+      } else {
+        await startExam(exams[0].id);
+      }
     } else {
       showExamSelect(exams);
     }
@@ -152,7 +181,77 @@ async function handleLogin() {
     errEl.classList.remove("hidden");
     showError("Login Error", err.message);
     $("login-btn").disabled = false;
-    $("login-btn").textContent = "Login";
+    $("login-btn").textContent = "Login";  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Force password change screen
+// ─────────────────────────────────────────────────────────────────────────────
+function showChangePasswordScreen() {
+  const errEl = $("cp-error");
+  if (errEl) errEl.classList.add("hidden");
+  showScreen("change-password-screen");
+}
+
+async function handleChangePassword() {
+  const np1 = $("cp-new1").value;
+  const np2 = $("cp-new2").value;
+  const errEl = $("cp-error");
+  errEl.classList.add("hidden");
+
+  if (!np1 || np1.length < 8) {
+    errEl.textContent = "New password must be at least 8 characters.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  if (np1 !== np2) {
+    errEl.textContent = "Passwords do not match.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+
+  const btn = $("cp-submit-btn");
+  btn.disabled = true;
+  btn.textContent = "Changing…";
+  try {
+    // Use Army No (username) as the current password — matches bulk-import default
+    await api("PUT", "/api/auth/change-password", {
+      current_password: currentUser.username,
+      new_password: np1,
+    }, true);
+
+    // Clear the flag locally
+    currentUser.must_change_password = false;
+    $("cp-new1").value = "";
+    $("cp-new2").value = "";
+
+    // Proceed to exam list
+    const exams = await api("GET", "/api/exam/available", null, true);
+    if (!exams || exams.length === 0) {
+      showError("No Exams", "No exams are currently available. Please contact your Instructor.");
+      showScreen("login-screen");
+      return;
+    }
+    if (exams.length === 1) {
+      // Auto-start only if the student has no released results to view
+      let hasReleased = false;
+      try {
+        const myResults = await api("GET", "/api/exam/my-results", null, true);
+        hasReleased = myResults && myResults.some((r) => r.result_released);
+      } catch (_) {}
+      if (hasReleased) {
+        showExamSelect(exams);
+      } else {
+        await startExam(exams[0].id);
+      }
+    } else {
+      showExamSelect(exams);
+    }
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove("hidden");
+    btn.disabled = false;
+    btn.textContent = "Change Password";
   }
 }
 
@@ -165,56 +264,87 @@ async function showExamSelect(exams) {
     btn.className = "exam-item";
     btn.innerHTML = `
       <div class="exam-item-title">${exam.title}</div>
-      <div class="exam-item-meta">${exam.course_name || ""} â€¢ ${exam.duration_minutes} min â€¢ ${exam.total_marks} marks</div>
+      <div class="exam-item-meta">${exam.course_name || ""} &middot; ${exam.duration_minutes} min &middot; ${exam.total_marks} marks</div>
     `;
     btn.addEventListener("click", () => startExam(exam.id));
     list.appendChild(btn);
   });
+
+  // Show released results if any
+  try {
+    const myResults = await api("GET", "/api/exam/my-results", null, true);
+    const releasedEl = $("released-results");
+    if (releasedEl && myResults && myResults.length > 0) {
+      const released = myResults.filter((r) => r.result_released);
+      if (released.length > 0) {
+        releasedEl.innerHTML = `<p class="released-heading">Your Released Results:</p>`;
+        released.forEach((r) => {
+          const btn = document.createElement("button");
+          btn.className = "exam-item released-item";
+          btn.innerHTML = `
+            <div class="exam-item-title">View Result — Exam #${r.exam_id}</div>
+            <div class="exam-item-meta">Score: ${r.score !== null ? r.score : '?'} &middot; Click to review your paper</div>
+          `;
+          btn.addEventListener("click", () => loadAndShowReview(r.session_id));
+          releasedEl.appendChild(btn);
+        });
+        releasedEl.classList.remove("hidden");
+      } else {
+        releasedEl.classList.add("hidden");
+      }
+    }
+  } catch (_) { /* non-critical */ }
+
   showScreen("exam-select-screen");
 }
 
 async function startExam(examId) {
-  try {
-    examData = await api("POST", "/api/exam/start", { exam_id: examId }, true);
-  } catch (err) {
-    if (err.status === 409) {
-      await showAlreadyCompleted(examId);
+  // Show instructions screen; proceed to load exam only after student accepts
+  showScreen("exam-instructions-screen");
+  const acceptChk  = $("instr-accept-chk");
+  const startBtn   = $("instr-start-btn");
+  const cancelBtn  = $("instr-cancel-btn");
+  // Reset state
+  acceptChk.checked = false;
+  startBtn.disabled = true;
+  // Clone buttons to remove any old listeners
+  const newStart  = startBtn.cloneNode(true);
+  const newCancel = cancelBtn.cloneNode(true);
+  startBtn.parentNode.replaceChild(newStart, startBtn);
+  cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+  $("instr-accept-chk").onchange = (e) => { $("instr-start-btn").disabled = !e.target.checked; };
+  $("instr-start-btn").addEventListener("click", async () => {
+    $("instr-start-btn").disabled = true;
+    $("instr-start-btn").textContent = "Loading…";
+    try {
+      examData = await api("POST", "/api/exam/start", { exam_id: examId }, true);
+    } catch (err) {
+      $("instr-start-btn").disabled = false;
+      $("instr-start-btn").textContent = "Start Exam";
+      if (err.status === 409) { await showAlreadyCompleted(examId); return; }
+      showError("Exam Start Failed", err.message);
       return;
     }
-    showError("Exam Start Failed", err.message);
-    throw err;
-  }
-  if (!examData.questions || examData.questions.length === 0)
-    throw new Error("This exam has no questions.");
-  startExamScreen();
+    if (!examData.questions || examData.questions.length === 0) {
+      showError("Exam Error", "This exam has no questions.");
+      return;
+    }
+    startExamScreen();
+  });
+  $("instr-cancel-btn").addEventListener("click", async () => {
+    const exams = await api("GET", "/api/exam/available", null, true).catch(() => []);
+    showExamSelect(exams);
+  });
 }
 
 async function showAlreadyCompleted(examId) {
-  // Try to fetch the student's result for this exam to show the score
-  $('result-icon').textContent  = 'âœ…';
+  $('result-icon').innerHTML = '<svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
   $('result-title').textContent = 'Exam Already Submitted';
   $('result-score').textContent = '';
-  $('result-pct').textContent   = 'Loading your scoreâ€¦';
+  $('result-pct').textContent   = 'You have already completed this exam. Your result will be released by the Instructor.';
   $('result-back-btn').classList.remove('hidden');
   $('result-exit-btn').classList.remove('hidden');
   showScreen('result-screen');
-
-  try {
-    const sessions = await api("GET", "/api/exam/my-results", null, true);
-    const session  = sessions.find((s) => s.exam_id === examId && s.status === 'submitted');
-    if (session) {
-      const result = await api("GET", `/api/exam/result/${session.id}`, null, true);
-      const pct = result.total_marks > 0
-        ? Math.round((result.score / result.total_marks) * 100)
-        : 0;
-      $('result-score').textContent = `${result.score} / ${result.total_marks}`;
-      $('result-pct').textContent   = `Your Score: ${pct}%`;
-    } else {
-      $('result-pct').textContent = 'You have already completed this exam.';
-    }
-  } catch (_) {
-    $('result-pct').textContent = 'You have already completed this exam.';
-  }
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -223,8 +353,11 @@ async function showAlreadyCompleted(examId) {
 function startExamScreen() {
   // Initialise answers map
   answers = {};
+  markedForReview = {};
   examData.questions.forEach((q) => (answers[q.id] = ""));
   currentIdx = 0;
+  _warned5min = false;
+  _warned1min = false;
 
   // Header
   $("header-title").textContent  = examData.title;
@@ -235,6 +368,7 @@ function startExamScreen() {
   buildNav();
   renderQuestion(0);
   startTimer(examData.duration_minutes * 60);
+  startAutoSave();
 
   showScreen("exam-screen");
 }
@@ -256,8 +390,9 @@ function updateNav() {
   const btns = $("question-nav").querySelectorAll(".q-nav-btn");
   btns.forEach((btn, i) => {
     const q = examData.questions[i];
-    btn.classList.remove("answered", "current");
+    btn.classList.remove("answered", "current", "review");
     if (i === currentIdx) btn.classList.add("current");
+    else if (markedForReview[q.id]) btn.classList.add("review");
     else if (answers[q.id] && answers[q.id].trim()) btn.classList.add("answered");
   });
 
@@ -281,11 +416,26 @@ function renderQuestion(idx) {
 
   $("question-counter").textContent = `Q ${idx + 1} of ${examData.questions.length}`;
   $("q-text").textContent   = q.text;
-  $("q-type-badge").textContent = q.type.replace("_", " ").toUpperCase();
+  $("q-type-badge").textContent = q.type.replace(/_/g, " ").toUpperCase();
   $("q-marks").textContent  = `${q.marks} mark${q.marks !== 1 ? "s" : ""}`;
 
+  // Mark-for-review button
+  const reviewBtn = $("mark-review-btn");
+  if (reviewBtn) {
+    reviewBtn.textContent = markedForReview[q.id] ? "\u2605 Marked for Review" : "\u2606 Mark for Review";
+    reviewBtn.className   = markedForReview[q.id] ? "review-btn marked" : "review-btn";
+    reviewBtn.onclick = () => {
+      markedForReview[q.id] = !markedForReview[q.id];
+      reviewBtn.textContent = markedForReview[q.id] ? "\u2605 Marked for Review" : "\u2606 Mark for Review";
+      reviewBtn.className   = markedForReview[q.id] ? "review-btn marked" : "review-btn";
+      updateNav();
+    };
+  }
+
   // Hide all answer inputs
-  ["q-options", "q-tf", "q-textarea"].forEach((id) => $( id).classList.add("hidden"));
+  ["q-options", "q-tf", "q-textarea", "q-screenshot", "q-fill-wrap"].forEach((id) => {
+    const el = $(id); if (el) el.classList.add("hidden");
+  });
 
   const saved = answers[q.id] || "";
 
@@ -299,6 +449,13 @@ function renderQuestion(idx) {
       btn.className = "option-btn" + (saved === opt ? " selected" : "");
       btn.innerHTML = `<span class="option-label">${labels[i] || i + 1}</span>${opt}`;
       btn.addEventListener("click", () => {
+        if (answers[q.id] === opt) {
+          // Deselect
+          btn.classList.remove("selected");
+          answers[q.id] = "";
+          updateNav();
+          return;
+        }
         optEl.querySelectorAll(".option-btn").forEach((b) => b.classList.remove("selected"));
         btn.classList.add("selected");
         answers[q.id] = opt;
@@ -312,20 +469,126 @@ function renderQuestion(idx) {
     tfEl.querySelectorAll(".tf-btn").forEach((btn) => {
       btn.classList.toggle("selected", btn.dataset.val === saved);
       btn.onclick = () => {
+        if (answers[q.id] === btn.dataset.val) {
+          // Deselect
+          btn.classList.remove("selected");
+          answers[q.id] = "";
+          updateNav();
+          return;
+        }
         tfEl.querySelectorAll(".tf-btn").forEach((b) => b.classList.remove("selected"));
         btn.classList.add("selected");
         answers[q.id] = btn.dataset.val;
         updateNav();
       };
     });
-  } else {
+  } else if (q.type === "short_answer_screenshot") {
+    // Legacy type — treat same as short_answer (text + optional screenshot)
     const ta = $("q-textarea");
     ta.classList.remove("hidden");
-    ta.value = saved;
-    ta.oninput = () => {
-      answers[q.id] = ta.value;
-      updateNav();
-    };
+    // If the stored answer is a screenshot filename, clear it (show empty textarea)
+    ta.value = /^[0-9a-f\-]{36}\.[a-z]+$/i.test(saved) ? '' : (saved || '');
+    ta.oninput = () => { answers[q.id] = ta.value; updateNav(); };
+    // Fall through to also show screenshot section
+    const ssEl = $("q-screenshot");
+    if (ssEl) {
+      ssEl.classList.remove("hidden");
+      const fileInput  = ssEl.querySelector(".ss-file-input");
+      const previewImg = ssEl.querySelector(".ss-preview");
+      const statusEl   = ssEl.querySelector(".ss-status");
+      if (saved && /^[0-9a-f\-]{36}\.[a-z]+$/i.test(saved) && previewImg) {
+        previewImg.classList.remove("hidden");
+        previewImg.alt = saved;
+        previewImg.src = "";
+        if (statusEl) statusEl.textContent = `\u2713 Uploaded: ${saved}`;
+      }
+      if (fileInput) {
+        fileInput.onchange = async () => {
+          const file = fileInput.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (ev) => { if (previewImg) { previewImg.src = ev.target.result; previewImg.classList.remove("hidden"); } };
+          reader.readAsDataURL(file);
+          if (statusEl) statusEl.textContent = "Uploading\u2026";
+          try {
+            const filename = await uploadScreenshot(file);
+            answers[q.id] = filename;
+            if (statusEl) statusEl.textContent = `\u2713 Uploaded: ${filename}`;
+            updateNav();
+          } catch (err) {
+            if (statusEl) statusEl.textContent = `Upload failed: ${err.message}`;
+          }
+        };
+      }
+    }
+  } else if (q.type === "short_answer") {
+    const ta = $("q-textarea");
+    ta.classList.remove("hidden");
+    ta.value = saved || '';
+    ta.oninput = () => { answers[q.id] = ta.value; updateNav(); };
+    // Also show optional screenshot section
+    const ssEl = $("q-screenshot");
+    if (ssEl) {
+      ssEl.classList.remove("hidden");
+      const fileInput  = ssEl.querySelector(".ss-file-input");
+      const previewImg = ssEl.querySelector(".ss-preview");
+      const statusEl   = ssEl.querySelector(".ss-status");
+      if (statusEl && !ssEl._labelled) {
+        ssEl._labelled = true;
+        const lbl = ssEl.querySelector(".screenshot-label");
+        if (lbl) lbl.textContent = "Optional: attach a screenshot";
+      }
+      if (fileInput) {
+        fileInput.onchange = async () => {
+          const file = fileInput.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (ev) => { if (previewImg) { previewImg.src = ev.target.result; previewImg.classList.remove("hidden"); } };
+          reader.readAsDataURL(file);
+          if (statusEl) statusEl.textContent = "Uploading\u2026";
+          try {
+            const filename = await uploadScreenshot(file);
+            // Store screenshot filename as a note — text answer takes priority
+            if (statusEl) statusEl.textContent = `\u2713 Screenshot attached: ${filename}`;
+            // Append a reference to the textarea if it's empty
+            if (!answers[q.id]) { answers[q.id] = filename; }
+            updateNav();
+          } catch (err) {
+            if (statusEl) statusEl.textContent = `Upload failed: ${err.message}`;
+          }
+        };
+      }
+    }
+  } else {
+    // fill_blank: use hint datalist if enabled, otherwise plain textarea
+    const ta       = $("q-textarea");
+    const fillWrap  = $("q-fill-wrap");
+    const fillInput = $("q-fill-input");
+    if (q.type === "fill_blank" && examData.fitb_hint_enabled && fillWrap && fillInput) {
+      // Build word bank from ALL fill_blank questions' hints (deduplicated)
+      const pool = [];
+      examData.questions.forEach((otherQ) => {
+        if (otherQ.type === "fill_blank" && otherQ.hints) {
+          otherQ.hints.forEach((h) => {
+            const t = h && h.trim();
+            if (t && !pool.includes(t)) pool.push(t);
+          });
+        }
+      });
+      fillWrap.classList.remove("hidden");
+      fillInput.value = saved || '';
+      const hintPanel = $("q-hint-panel");
+      renderFitbHints(pool, (saved || '').trim(), hintPanel);
+      fillInput.oninput = () => {
+        answers[q.id] = fillInput.value;
+        updateNav();
+        renderFitbHints(pool, fillInput.value.trim(), hintPanel);
+      };
+    } else {
+      ta.classList.remove("hidden");
+      ta.value = saved || '';
+      ta.oninput = () => { answers[q.id] = ta.value; updateNav(); };
+    }
   }
 
   // Navigation buttons
@@ -333,11 +596,60 @@ function renderQuestion(idx) {
   updateNav();
 }
 
+function renderFitbHints(pool, query, panel) {
+  if (!panel || pool.length === 0) return;
+  const q = query.toLowerCase();
+  if (q.length === 0) {
+    panel.classList.add("hidden");
+    panel.innerHTML = "";
+    return;
+  }
+  const matches = pool.filter((h) => h.toLowerCase().includes(q));
+  if (matches.length === 0) {
+    panel.classList.add("hidden");
+    panel.innerHTML = "";
+    return;
+  }
+  panel.classList.remove("hidden");
+  panel.innerHTML =
+    '<span class="hint-label">\ud83d\udca1 Word bank:</span>' +
+    matches.map((h) => `<span class="hint-chip">${escapeHtml(h)}</span>`).join("");
+}
+
 function saveCurrentAnswer() {
   const q = examData.questions[currentIdx];
-  if (q.type === "fill_blank" || q.type === "short_answer") {
-    answers[q.id] = $("q-textarea").value;
+  if (q.type === "fill_blank" || q.type === "short_answer" || q.type === "short_answer_screenshot") {
+    if (q.type === "fill_blank" && examData.fitb_hint_enabled && q.hints && q.hints.length > 0) {
+      answers[q.id] = $("q-fill-input").value || answers[q.id] || "";
+    } else {
+      answers[q.id] = $("q-textarea").value || answers[q.id] || "";
+    }
   }
+}
+
+// Upload screenshot to server and return filename
+async function uploadScreenshot(file) {
+  const ALLOWED = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (!ALLOWED.includes(file.type)) throw new Error('Only JPEG, PNG, GIF or WebP images are allowed.');
+  if (file.size > 10 * 1024 * 1024) throw new Error('Image must be under 10 MB.');
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  let res;
+  try {
+    res = await fetch(`${serverUrl}/api/exam/upload-screenshot`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+  } catch (networkErr) {
+    throw new Error(`Network error: ${networkErr.message}`);
+  }
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || `Upload failed (HTTP ${res.status})`);
+  return data.filename;
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -349,11 +661,47 @@ function startTimer(seconds) {
   timerInterval = setInterval(() => {
     secondsLeft--;
     updateTimerDisplay();
+    // Timer warnings
+    if (secondsLeft === 5 * 60 && !_warned5min) {
+      _warned5min = true;
+      showTimerWarning("5 minutes remaining!");
+      playBeep(2);
+    } else if (secondsLeft === 60 && !_warned1min) {
+      _warned1min = true;
+      showTimerWarning("1 minute remaining — submit now!");
+      playBeep(4);
+    }
     if (secondsLeft <= 0) {
       clearInterval(timerInterval);
       autoSubmit();
     }
   }, 1000);
+}
+
+function showTimerWarning(msg) {
+  const banner = $("timer-warning-banner");
+  if (!banner) return;
+  banner.textContent = "⚠ " + msg;
+  banner.classList.remove("hidden");
+  setTimeout(() => banner.classList.add("hidden"), 8000);
+}
+
+function playBeep(times) {
+  try {
+    const ctx = new AudioContext();
+    for (let i = 0; i < times; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.4);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.4 + 0.35);
+      osc.start(ctx.currentTime + i * 0.4);
+      osc.stop(ctx.currentTime + i * 0.4 + 0.35);
+    }
+  } catch (_) { /* AudioContext not available — silent degradation */ }
 }
 
 function updateTimerDisplay() {
@@ -369,6 +717,78 @@ function updateTimerDisplay() {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Custom confirm modal (replaces native confirm() which fights blur handler)
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// =============================================================================
+// Auto-save answers to backend every 30 seconds
+// =============================================================================
+function startAutoSave() {
+  if (autoSaveInterval) clearInterval(autoSaveInterval);
+  autoSaveInterval = setInterval(autoSaveAnswers, 30 * 1000);
+}
+
+function stopAutoSave() {
+  if (autoSaveInterval) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
+}
+
+async function autoSaveAnswers() {
+  if (!examData || !token) return;
+  saveCurrentAnswer();
+  const payload = Object.entries(answers).map(([question_id, student_answer]) => ({
+    question_id,
+    student_answer: student_answer || "",
+  }));
+  try {
+    await api("PATCH", `/api/exam/sessions/${examData.session_id}/answers`, { answers: payload }, true);
+  } catch (_) { /* non-critical - answers safe in memory */ }
+}
+
+// =============================================================================
+// Paper review screen (student sees their paper after result is released)
+// =============================================================================
+async function loadAndShowReview(sessionId) {
+  try {
+    const result = await api("GET", `/api/exam/result/${sessionId}`, null, true);
+    showReviewScreen(result);
+  } catch (err) {
+    showError("Could not load result", err.message);
+  }
+}
+
+function showReviewScreen(result) {
+  const container = $("review-content");
+  if (!container) return;
+  const pct = result.percentage || 0;
+  const answersHtml = (result.answers || []).map(function(a, i) {
+    const cls = a.score >= a.max_score ? 'correct' : (a.score > 0 ? 'partial' : 'wrong');
+    const correctLine = a.correct_answer
+      ? '<div class="review-q-correct">Correct answer: <span>' + escapeHtml(a.correct_answer) + '</span></div>'
+      : '';
+    const feedbackLine = a.feedback
+      ? '<div class="review-q-feedback">Feedback: ' + escapeHtml(a.feedback) + '</div>'
+      : '';
+    return '<li class="review-q">'
+      + '<div class="review-q-text"><strong>Q' + (i + 1) + '.</strong> ' + escapeHtml(a.question_text || a.question_id) + '</div>'
+      + '<div class="review-q-your">Your answer: <span class="' + cls + '">' + escapeHtml(a.student_answer || '(no answer)') + '</span></div>'
+      + correctLine
+      + '<div class="review-q-score">Score: ' + a.score + ' / ' + a.max_score + '</div>'
+      + feedbackLine
+      + '</li>';
+  }).join('');
+  container.innerHTML = '<div class="review-summary">'
+    + '<h2 class="review-exam-title">' + escapeHtml(result.exam_title) + '</h2>'
+    + '<div class="review-score-line">Score: <strong>' + result.score + ' / ' + result.total_marks + '</strong> &nbsp;|&nbsp; ' + pct + '%</div>'
+    + '</div>'
+    + '<ol class="review-questions">' + answersHtml + '</ol>';
+  showScreen("review-screen");
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 function showConfirm(message) {
   return new Promise((resolve) => {
     $("confirm-msg").textContent = message;
@@ -415,6 +835,12 @@ async function autoSubmit() {
 
 async function doSubmit(isAuto = false) {
   clearInterval(timerInterval);
+  stopAutoSave();
+  const submitBtn = $("submit-btn");
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="submit-spinner"></span> Submitting…';
+  }
   try {
     const submissionAnswers = examData.questions.map((q) => ({
       question_id: q.id,
@@ -429,19 +855,19 @@ async function doSubmit(isAuto = false) {
     window.examBridge.notifySubmitted();
     showResultScreen(result, isAuto);
   } catch (err) {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Submit Exam";
+    }
     showError("Submission Failed", `${err.message}\n\nPlease contact the invigilator.`);
   }
 }
 
 function showResultScreen(result, isAuto) {
-  const pct = result.total_marks > 0
-    ? Math.round((result.score / result.total_marks) * 100)
-    : 0;
-
-  $("result-icon").textContent  = pct >= 50 ? "ðŸŽ‰" : "ðŸ“‹";
-  $("result-title").textContent = isAuto ? "Time's up â€” Exam Auto-Submitted" : "Exam Submitted!";
-  $("result-score").textContent = `${result.score} / ${result.total_marks}`;
-  $("result-pct").textContent   = `Score: ${pct}%`;
+  $("result-icon").innerHTML = '<svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+  $("result-title").textContent = isAuto ? "Time's up \u2014 Exam Auto-Submitted" : "Exam Submitted!";
+  $("result-score").textContent = "";
+  $("result-pct").textContent   = "Your result will be released by the Instructor after review.";
   $("result-back-btn").classList.add("hidden");
   $("result-exit-btn").classList.remove("hidden");
 
@@ -452,7 +878,12 @@ function showResultScreen(result, isAuto) {
 // Event listeners
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $("login-btn").addEventListener("click", handleLogin);
-$("exit-btn").addEventListener("click", () => window.examBridge.requestExit());
+$("exit-btn").addEventListener("click", async () => {
+  const ok = await showConfirm(
+    "Are you sure you want to exit the exam?\n\nYour current session will remain saved but any unsaved progress since the last auto-save may be lost. You will not be able to return to this exam once you exit."
+  );
+  if (ok) window.examBridge.requestExit();
+});
 $("result-exit-btn").addEventListener("click", () => window.examBridge.requestExit());
 $("result-back-btn").addEventListener("click", () => {
   // Return to exam list (re-fetch available exams)
@@ -461,8 +892,6 @@ $("result-back-btn").addEventListener("click", () => {
     .then((exams) => {
       if (!exams || exams.length === 0) {
         showScreen("login-screen");
-      } else if (exams.length === 1) {
-        startExam(exams[0].id);
       } else {
         showExamSelect(exams);
       }
@@ -491,6 +920,14 @@ $("next-btn").addEventListener("click", () => {
 $("submit-btn").addEventListener("click", confirmSubmit);
 
 $("error-toast-close").addEventListener("click", hideError);
+
+// Change password screen
+const _cpBtn = $("cp-submit-btn");
+if (_cpBtn) _cpBtn.addEventListener("click", handleChangePassword);
+
+// Review screen back button
+const _reviewBack = $("review-back-btn");
+if (_reviewBack) _reviewBack.addEventListener("click", () => showScreen("exam-select-screen"));
 
 // Disable right-click, text selection drag, clipboard in question area
 document.addEventListener("contextmenu", (e) => e.preventDefault());

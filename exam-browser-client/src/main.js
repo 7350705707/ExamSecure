@@ -43,6 +43,14 @@ function createWindow() {
   // ── Load the renderer ──────────────────────────────────────────────────────
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 
+  // ── Intercept ALL close attempts (Alt+F4, taskbar, etc.) ─────────────────
+  // closable:false blocks the title-bar button; this catches every other path.
+  mainWindow.on("close", (event) => {
+    if (!isExiting) {
+      event.preventDefault();   // swallow the close silently
+    }
+  });
+
   // ── Prevent DevTools ──────────────────────────────────────────────────────
   mainWindow.webContents.on("devtools-opened", () => {
     mainWindow.webContents.closeDevTools();
@@ -209,6 +217,14 @@ app.whenReady().then(() => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+});
+
+// Block OS-level quit (e.g. task manager close, system shutdown shortcut)
+// unless an intentional exit via IPC has been acknowledged.
+app.on("before-quit", (event) => {
+  if (!isExiting) {
+    event.preventDefault();
+  }
 });
 
 // Prevent multiple instances

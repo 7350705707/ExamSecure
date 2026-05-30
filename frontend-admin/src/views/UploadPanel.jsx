@@ -39,8 +39,7 @@ function QuestionEditor({ question, index, onSave, onCancel }) {
           <select value={q.type} onChange={e => set('type', e.target.value)}
             className="text-xs px-2 py-1 rounded bg-gray-700 border border-gray-600 text-gray-200 outline-none focus:border-indigo-500">
             <option value="mcq">MCQ</option>
-            <option value="short">Short Answer</option>
-            <option value="long">Long Answer</option>
+            <option value="fill_blank">Fill in the Blank</option>
             <option value="true_false">True / False</option>
           </select>
         </div>
@@ -99,12 +98,24 @@ function QuestionEditor({ question, index, onSave, onCancel }) {
         </div>
       )}
 
-      {/* Short / Long answer key */}
-      {(q.type === 'short' || q.type === 'long') && (
+      {/* Fill in the Blank answer */}
+      {q.type === 'fill_blank' && (
         <div>
-          <label className="text-xs text-gray-400 block mb-1">Expected Answer / Rubric</label>
-          <textarea value={q.answer_key || ''} onChange={e => set('answer_key', e.target.value)} rows={2}
-            className="w-full text-sm px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 outline-none focus:border-indigo-500 resize-y" />
+          <label className="text-xs text-gray-400 block mb-1">
+            Correct Answer(s)
+            <span className="text-gray-500 ml-1 normal-case font-normal">(separate multiple answers with a comma)</span>
+          </label>
+          <input
+            value={q.answer_key || ''}
+            onChange={e => set('answer_key', e.target.value)}
+            placeholder="e.g. photosynthesis  or  Newton, Isaac Newton"
+            className={`w-full text-sm px-3 py-2 rounded-lg bg-gray-700 border text-gray-200 outline-none focus:border-indigo-500 ${
+              !q.answer_key?.trim() ? 'border-red-500' : 'border-gray-600'
+            }`}
+          />
+          {!q.answer_key?.trim() && (
+            <p className="text-xs text-red-400 mt-1">Answer is required for fill-in-the-blank questions.</p>
+          )}
         </div>
       )}
 
@@ -123,18 +134,32 @@ function QuestionEditor({ question, index, onSave, onCancel }) {
 }
 
 // ── Read-only question card ────────────────────────────────────────────────
+function hasEmptyAnswer(q) {
+  if (q.type === 'mcq') return !q.answer_key || !q.options?.includes(q.answer_key);
+  if (q.type === 'true_false') return q.answer_key !== 'True' && q.answer_key !== 'False';
+  if (q.type === 'fill_blank') return !q.answer_key || !String(q.answer_key).trim();
+  return false;
+}
+
 function QuestionCard({ q, index, onEdit, onRemove }) {
   const isMcq = q.type === 'mcq';
   const lowOptions = isMcq && (!q.options || q.options.length < 4);
+  const missingAnswer = hasEmptyAnswer(q);
+  const hasWarning = lowOptions || missingAnswer;
 
   return (
-    <div className={`bg-gray-900 rounded-xl border p-4 ${lowOptions ? 'border-amber-500' : 'border-gray-700'}`}>
+    <div className={`bg-gray-900 rounded-xl border p-4 ${hasWarning ? 'border-red-500' : 'border-gray-700'}`}>
       <div className="flex items-start gap-2 flex-wrap mb-2">
         <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 border border-indigo-200 font-semibold">{q.type}</span>
         <span className="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-300 border border-gray-600 font-semibold">{q.marks} mk</span>
         {lowOptions && (
           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300 font-semibold">
             ⚠ {q.options?.length || 0}/4 options
+          </span>
+        )}
+        {missingAnswer && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-300 font-semibold">
+            ✗ No answer set
           </span>
         )}
         <span className="text-xs text-gray-500 ml-auto">#{index + 1}</span>
@@ -151,8 +176,16 @@ function QuestionCard({ q, index, onEdit, onRemove }) {
           ))}
         </ul>
       )}
-      {q.answer_key && !isMcq && (
-        <p className="text-xs text-emerald-600 mt-1">Answer: {q.answer_key}</p>
+      {q.answer_key && q.type !== 'mcq' && (
+        <p className="text-xs text-emerald-600 mt-1">
+          {q.type === 'fill_blank' ? 'Answer(s): ' : 'Answer: '}{q.answer_key}
+        </p>
+      )}
+      {missingAnswer && (
+        <p className="text-xs text-red-400 mt-1.5">
+          Please set the correct answer.{' '}
+          <button onClick={onEdit} className="underline text-indigo-400 hover:text-indigo-300 font-semibold">Edit to fix</button>
+        </p>
       )}
     </div>
   );
@@ -191,6 +224,8 @@ export default function UploadPanel({ onSaved }) {
       const result = await uploadParseExam(file);
       setParsed(result.questions || []);
       setTitle(result.title || file.name.replace(/\.[^.]+$/, ''));
+      if (result.course_name) setCourse(result.course_name);
+      if (result.time_allowed) setDuration(result.time_allowed);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -210,10 +245,12 @@ export default function UploadPanel({ onSaved }) {
   }
 
   const mcqWarnings = parsed ? parsed.filter(q => q.type === 'mcq' && (!q.options || q.options.length < 4)).length : 0;
+  const answerWarnings = parsed ? parsed.filter(q => hasEmptyAnswer(q)).length : 0;
 
   async function handleSave() {
     if (!parsed || !title.trim()) { setError('Provide a title before saving.'); return; }
     if (mcqWarnings > 0) { setError(`Fix ${mcqWarnings} MCQ question(s) with fewer than 4 options first.`); return; }
+    if (answerWarnings > 0) { setError(`Fix ${answerWarnings} question(s) with no answer set. Use the Edit button on each highlighted question.`); return; }
     setSaving(true); setError('');
     try {
       const total = parsed.reduce((s, q) => s + Number(q.marks || 1), 0);
@@ -234,7 +271,6 @@ export default function UploadPanel({ onSaved }) {
   }
 
   const newTemplate = { type: 'mcq', text: '', marks: 1, options: ['', '', '', ''], answer_key: '' };
-
   return (
     <div className="flex-1 flex flex-col gap-5 p-6 overflow-y-auto">
       <div>
@@ -300,13 +336,6 @@ export default function UploadPanel({ onSaved }) {
             </div>
           </div>
 
-          {/* MCQ warning banner */}
-          {mcqWarnings > 0 && (
-            <div className="bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-2 text-sm">
-              ⚠ {mcqWarnings} MCQ question{mcqWarnings > 1 ? 's have' : ' has'} fewer than 4 options — please edit before saving.
-            </div>
-          )}
-
           {/* Questions list */}
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -342,6 +371,22 @@ export default function UploadPanel({ onSaved }) {
               )}
             </div>
           </div>
+
+          {/* Validation banners near Save */}
+          {mcqWarnings > 0 && (
+            <div className="bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-2 text-sm">
+              ⚠ {mcqWarnings} MCQ question{mcqWarnings > 1 ? 's have' : ' has'} fewer than 4 options — please edit before saving.
+            </div>
+          )}
+
+          {answerWarnings > 0 && (
+            <div className="bg-red-50 border border-red-300 text-red-800 rounded-lg px-4 py-2 text-sm flex items-start gap-2">
+              <span className="shrink-0 font-bold">✗</span>
+              <span>
+                {answerWarnings} question{answerWarnings > 1 ? 's have' : ' has'} no answer set — click <strong>Edit</strong> on each highlighted question to add the correct answer before saving.
+              </span>
+            </div>
+          )}
 
           {/* Action buttons */}
           <div className="flex gap-2 sticky bottom-4">

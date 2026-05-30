@@ -41,6 +41,7 @@ class CreateExamRequest(BaseModel):
     duration_minutes: int = 60
     total_marks: int = 100
     questions: list[Question] = []
+    fitb_hint_enabled: bool = False
 
 class UpdateExamRequest(BaseModel):
     title: Optional[str] = None
@@ -49,6 +50,7 @@ class UpdateExamRequest(BaseModel):
     duration_minutes: Optional[int] = None
     total_marks: Optional[int] = None
     questions: Optional[list[Question]] = None
+    fitb_hint_enabled: Optional[bool] = None
 
 class ExamSummary(BaseModel):
     id: int
@@ -74,6 +76,7 @@ class StudentQuestion(BaseModel):
     text: str
     options: Optional[list[str]] = None
     marks: int
+    hints: Optional[list[str]] = None   # FITB suggestions when instructor enables hints
 
 class StartExamResponse(BaseModel):
     session_id: int
@@ -82,6 +85,7 @@ class StartExamResponse(BaseModel):
     duration_minutes: int
     total_marks: int
     questions: list[StudentQuestion]
+    fitb_hint_enabled: bool = False
 
 class AnswerItem(BaseModel):
     question_id: str
@@ -93,6 +97,9 @@ class SubmitExamRequest(BaseModel):
 
 class AnswerResult(BaseModel):
     question_id: str
+    question_text: str = ""
+    question_type: str = ""
+    correct_answer: str = ""
     student_answer: str
     score: float
     max_score: float

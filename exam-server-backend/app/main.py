@@ -4,11 +4,12 @@ import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from app.config import CORS_ORIGINS, DEBUG
-from app.database import init_db
+from app.database import async_init_db
 from app.routers import auth, exam, admin
 from app.utils.logger import setup_logging
 
@@ -57,9 +58,9 @@ app.include_router(admin.router)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     logger.info("ExamServer starting up — initialising database")
-    init_db()
+    await async_init_db()
     logger.info("Database ready")
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -67,7 +68,30 @@ def on_startup():
 def health():
     return {"status": "ok"}
 
-# ── Serve built React admin panel (if present) ────────────────────────────────
-_static = Path(__file__).parent.parent / "static" / "admin"
-if _static.exists():
-    app.mount("/admin", StaticFiles(directory=str(_static), html=True), name="admin")
+# ── Serve built React admin panel ─────────────────────────────────────────────
+# Docker / production: Dockerfile copies dist → static/admin/ (VITE_BASE=/admin/)
+_docker_static = Path(__file__).parent.parent / "static" / "admin"
+# Local dev: build frontend-admin normally (VITE_BASE defaults to /) then serve here
+_dev_static    = Path(__file__).parent.parent.parent / "frontend-admin" / "dist"
+
+if _docker_static.exists():
+    # Assets built with base=/admin/ — mount at /admin and redirect root there
+    app.mount("/admin", StaticFiles(directory=str(_docker_static), html=True), name="admin")
+
+    @app.get("/", include_in_schema=False)
+    def _root_to_admin():
+        return RedirectResponse(url="/admin")
+
+    logger.info("Serving production frontend from %s", _docker_static)
+
+elif _dev_static.exists():
+    # Assets built with base=/ — mount directly at root; API routes registered
+    # above take priority so /api/* endpoints are never shadowed.
+    app.mount("/", StaticFiles(directory=str(_dev_static), html=True), name="admin")
+    logger.info("Serving local-dev frontend from %s", _dev_static)
+
+else:
+    logger.warning(
+        "No built frontend found. "
+        "Run 'npm run build' in frontend-admin/ to serve the admin panel."
+    )

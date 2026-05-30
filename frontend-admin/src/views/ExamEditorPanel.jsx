@@ -3,8 +3,9 @@ import { getExam, createExam, updateExam } from '../services/index.js';
 import QuestionCard from '../components/QuestionCard.jsx';
 
 const BLANK_EXAM = {
-  title: '', course_name: '', level: '', description: '',
+  title: '', course_name: '', description: '',
   duration_minutes: 60, pass_marks: 0, total_marks: 0, instructions: '', questions: [],
+  fitb_hint_enabled: false,
 };
 
 const BLANK_Q = {
@@ -27,7 +28,7 @@ export default function ExamEditorPanel({ examId, onSaved }) {
 
   const emptyAnswerErrors = form.questions
     .map((q, i) => ({ q, i }))
-    .filter(({ q }) => !q.answer_key || !String(q.answer_key).trim());
+    .filter(({ q }) => q.type !== 'short_answer' && (!q.answer_key || !String(q.answer_key).trim()));
 
   const hasSaveBlocker = mcqOptionWarnings.length > 0 || emptyAnswerErrors.length > 0;
 
@@ -134,7 +135,6 @@ export default function ExamEditorPanel({ examId, onSaved }) {
       <div className="bg-gray-900 rounded-xl border border-gray-700 p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
         <Field label="Title" name="title" value={form.title} onChange={fieldChange} required />
         <Field label="Course / Subject" name="course_name" value={form.course_name} onChange={fieldChange} />
-        <Field label="Level" name="level" value={form.level} onChange={fieldChange} placeholder="e.g. A-Level, Grade 10" />
         <Field label="Duration (minutes)" name="duration_minutes" type="number" value={form.duration_minutes} onChange={fieldChange} />
         <Field label="Pass Marks" name="pass_marks" type="number" value={form.pass_marks} onChange={fieldChange} />
         <div className="md:col-span-2">
@@ -146,6 +146,18 @@ export default function ExamEditorPanel({ examId, onSaved }) {
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider block mb-1">Instructions</label>
           <textarea name="instructions" rows={2} value={form.instructions} onChange={fieldChange}
             className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 text-sm outline-none focus:border-indigo-500 resize-none" />
+        </div>
+        <div className="md:col-span-2 flex items-center gap-3">
+          <input
+            type="checkbox"
+            id="fitb_hint_enabled"
+            checked={!!form.fitb_hint_enabled}
+            onChange={(e) => setForm((f) => ({ ...f, fitb_hint_enabled: e.target.checked }))}
+            className="w-4 h-4 rounded border-gray-600 accent-indigo-500 cursor-pointer"
+          />
+          <label htmlFor="fitb_hint_enabled" className="text-sm text-gray-300 cursor-pointer select-none">
+            Enable fill-in-the-blank answer suggestions (hint autocomplete visible to student while typing)
+          </label>
         </div>
       </div>
 
@@ -201,7 +213,13 @@ function Field({ label, name, value, onChange, type = 'text', required, placehol
 const Q_TYPES = ['mcq', 'true_false', 'fill_blank', 'short_answer'];
 
 function QModal({ qForm, setQForm, onSave, onCancel }) {
-  function upd(k, v) { setQForm((f) => ({ ...f, [k]: v })); }
+  function upd(k, v) {
+    if (k === 'type') {
+      setQForm((f) => ({ ...f, type: v, options: v === 'mcq' ? (f.options || ['', '', '', '']) : [] }));
+      return;
+    }
+    setQForm((f) => ({ ...f, [k]: v }));
+  }
   function updOption(i, v) {
     const opts = [...(qForm.options || ['', '', '', ''])];
     opts[i] = v;
@@ -249,14 +267,21 @@ function QModal({ qForm, setQForm, onSave, onCancel }) {
 
         <div>
           <label className="text-xs font-semibold uppercase tracking-wider block mb-1">
-            <span className={!qForm.answer_key || !String(qForm.answer_key).trim() ? "text-red-400" : "text-gray-400"}>
-              Answer Key
+            <span className={!qForm.answer_key && qForm.type !== 'short_answer' ? "text-red-400" : "text-gray-400"}>
+              {qForm.type === 'short_answer' ? 'Marking Rubric / Guidance (optional)' : 'Answer Key'}
             </span>
-            {(!qForm.answer_key || !String(qForm.answer_key).trim()) && (
+            {qForm.type !== 'short_answer' && (!qForm.answer_key || !String(qForm.answer_key).trim()) && (
               <span className="ml-1 text-red-500 text-xs font-bold">* Required</span>
             )}
           </label>
-          {qForm.type === 'true_false' ? (
+          {qForm.type === 'short_answer' ? (
+            <>
+              <textarea rows={2} value={qForm.answer_key || ''} onChange={(e) => upd('answer_key', e.target.value)}
+                placeholder="e.g. Award full marks if student correctly explains the concept…"
+                className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 text-sm outline-none focus:border-indigo-500 resize-none" />
+              <p className="text-xs text-indigo-400 mt-1">📝 Student types an answer. An optional screenshot upload is also available to the student.</p>
+            </>
+          ) : qForm.type === 'true_false' ? (
             <select value={qForm.answer_key} onChange={(e) => upd('answer_key', e.target.value)}
               className={`px-3 py-2 rounded-lg border bg-gray-800 text-gray-200 text-sm outline-none focus:border-indigo-500 ${
                 !qForm.answer_key || !String(qForm.answer_key).trim()
@@ -269,25 +294,17 @@ function QModal({ qForm, setQForm, onSave, onCancel }) {
             </select>
           ) : (
             <input value={qForm.answer_key} onChange={(e) => upd('answer_key', e.target.value)}
-              placeholder={qForm.type === 'mcq' ? 'e.g. A or exact option text' : 'Enter the correct answer'}
+              placeholder={qForm.type === 'mcq' ? 'e.g. A or exact option text' : 'Enter the correct answer (separate multiple with comma)'}
               className={`w-full px-3 py-2 rounded-lg border bg-gray-800 text-gray-200 text-sm outline-none focus:border-indigo-500 ${
                 !qForm.answer_key || !String(qForm.answer_key).trim()
                   ? 'border-red-500 ring-1 ring-red-500'
                   : 'border-gray-700'
               }`} />
           )}
-          {(!qForm.answer_key || !String(qForm.answer_key).trim()) && (
+          {qForm.type !== 'short_answer_screenshot' && qForm.type !== 'short_answer' && (!qForm.answer_key || !String(qForm.answer_key).trim()) && (
             <p className="text-red-400 text-xs mt-1">⚠ Answer key is required — this question will block saving.</p>
           )}
         </div>
-
-        {qForm.type === 'short_answer' && (
-          <div>
-            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider block mb-1">Rubric (LLM grading hint)</label>
-            <textarea rows={2} value={qForm.rubric || ''} onChange={(e) => upd('rubric', e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 text-sm outline-none focus:border-indigo-500 resize-none" />
-          </div>
-        )}
 
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onCancel} className="px-4 py-2 rounded-lg text-sm bg-gray-700 text-gray-300 hover:bg-gray-600 border border-gray-600 transition">Cancel</button>
