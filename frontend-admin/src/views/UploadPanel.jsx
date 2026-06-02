@@ -41,6 +41,8 @@ function QuestionEditor({ question, index, onSave, onCancel }) {
             <option value="mcq">MCQ</option>
             <option value="fill_blank">Fill in the Blank</option>
             <option value="true_false">True / False</option>
+            <option value="short_answer">Short Answer</option>
+            <option value="practical_vm">Practical VM</option>
           </select>
         </div>
         <div className="flex items-center gap-1.5">
@@ -116,6 +118,31 @@ function QuestionEditor({ question, index, onSave, onCancel }) {
           {!q.answer_key?.trim() && (
             <p className="text-xs text-red-400 mt-1">Answer is required for fill-in-the-blank questions.</p>
           )}
+        </div>
+      )}
+
+      {/* Short Answer rubric */}
+      {q.type === 'short_answer' && (
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">
+            Rubric / Grading Notes <span className="text-gray-600 font-normal">(optional — shown to instructor during review)</span>
+          </label>
+          <textarea
+            value={q.rubric || ''}
+            onChange={e => set('rubric', e.target.value)}
+            rows={3}
+            placeholder="e.g. Award 2 marks for mentioning X and Y. Deduct 1 mark for…"
+            className="w-full text-sm px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-200 outline-none focus:border-indigo-500 resize-y"
+          />
+          <p className="text-xs text-indigo-400 mt-1">📝 Student types their answer. Marks are assigned manually by the instructor.</p>
+        </div>
+      )}
+
+      {/* Practical VM info */}
+      {q.type === 'practical_vm' && (
+        <div className="bg-indigo-950 border border-indigo-700 rounded-lg px-4 py-3">
+          <p className="text-xs text-indigo-300 font-semibold mb-1">🖥 Practical VM Question</p>
+          <p className="text-xs text-indigo-400">Student opens the Proxmox console browser, completes the task, and submits screenshots as evidence. Marks are awarded manually by the instructor during review.</p>
         </div>
       )}
 
@@ -279,7 +306,7 @@ export default function UploadPanel({ onSaved }) {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-300 text-red-700 rounded-lg px-4 py-2 text-sm flex justify-between">
+        <div className="bg-red-950 border border-red-700 text-red-300 rounded-lg px-4 py-2 text-sm flex justify-between">
           <span>{error}</span>
           <button onClick={() => setError('')} className="ml-4 font-bold">×</button>
         </div>
@@ -370,17 +397,25 @@ export default function UploadPanel({ onSaved }) {
                   onCancel={() => setEditingIdx(null)} />
               )}
             </div>
+
+            {/* Add Question button at the bottom of the list */}
+            {editingIdx === null && (
+              <button onClick={() => setEditingIdx('new')}
+                className="mt-3 w-full px-3 py-2 text-sm rounded-lg border border-dashed border-indigo-700 text-indigo-400 hover:border-indigo-500 hover:text-indigo-300 hover:bg-indigo-950 transition font-semibold">
+                + Add Question
+              </button>
+            )}
           </div>
 
           {/* Validation banners near Save */}
           {mcqWarnings > 0 && (
-            <div className="bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-2 text-sm">
+            <div className="bg-amber-950 border border-amber-700 text-amber-300 rounded-lg px-4 py-2 text-sm">
               ⚠ {mcqWarnings} MCQ question{mcqWarnings > 1 ? 's have' : ' has'} fewer than 4 options — please edit before saving.
             </div>
           )}
 
           {answerWarnings > 0 && (
-            <div className="bg-red-50 border border-red-300 text-red-800 rounded-lg px-4 py-2 text-sm flex items-start gap-2">
+            <div className="bg-red-950 border border-red-700 text-red-300 rounded-lg px-4 py-2 text-sm flex items-start gap-2">
               <span className="shrink-0 font-bold">✗</span>
               <span>
                 {answerWarnings} question{answerWarnings > 1 ? 's have' : ' has'} no answer set — click <strong>Edit</strong> on each highlighted question to add the correct answer before saving.

@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { listResults, reviewSession, updateAnswerScore, releaseResult, releaseGroupResults } from '../services/index.js';
+import { listResults, reviewSession, updateAnswerScore, releaseResult, releaseGroupResults, markSessionReviewed } from '../services/index.js';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -92,6 +92,18 @@ function total(score, totalMarks) {
 }
 
 // ── Score badge ───────────────────────────────────────────────────────────────
+/** Parse a practical_vm student_answer into an array of screenshot filenames.
+ *  Handles: JSON array string, single UUID filename, or empty/invalid. */
+function parsePracticalVmShots(answer) {
+  if (!answer) return [];
+  try {
+    const arr = JSON.parse(answer);
+    if (Array.isArray(arr)) return arr.filter(Boolean);
+  } catch {}
+  if (/^[0-9a-f\-]{36}\.\w+$/i.test(answer)) return [answer];
+  return [];
+}
+
 function ScoreBadge({ score, total: tot }) {
   const p = tot ? (score / tot) * 100 : 0;
   const color =
@@ -201,6 +213,18 @@ function ExamGroup({ group, onReview, onRefresh }) {
   }
 
   async function handleReleaseGroup() {
+    const unreviewed = rows.filter((r) => !r.reviewed && !r.result_released);
+    if (unreviewed.length > 0) {
+      const names = unreviewed.slice(0, 5).map((r) => r.full_name || r.username).join(', ');
+      const more  = unreviewed.length > 5 ? ` and ${unreviewed.length - 5} more` : '';
+      alert(
+        `⚠ Cannot release results yet.\n\n` +
+        `${unreviewed.length} student${unreviewed.length !== 1 ? 's' : ''} have not been reviewed:\n` +
+        `${names}${more}\n\n` +
+        `Please review all students before releasing results.`
+      );
+      return;
+    }
     if (!confirm(`Release results for ALL students in "${exam_title}"?`)) return;
     const groupId = rows[0]?.group_id ?? null;
     setReleasing('group');
@@ -321,10 +345,12 @@ function ExamGroup({ group, onReview, onRefresh }) {
 
 // ── Review Modal ─────────────────────────────────────────────────────────────
 function ReviewModal({ sessionId, onClose, onSaved }) {
-  const [data, setData]     = useState(null);
-  const [scores, setScores] = useState({});
-  const [saving, setSaving] = useState(null); // question_id being saved
-  const [error, setError]   = useState('');
+  const [data, setData]       = useState(null);
+  const [scores, setScores]   = useState({});
+  const [saving, setSaving]   = useState(null);
+  const [markingReviewed, setMarkingReviewed] = useState(false);
+  const [error, setError]     = useState('');
+  const [lightbox, setLightbox] = useState(null); // { images, startIndex } or null
 
   useEffect(() => {
     reviewSession(sessionId)
@@ -363,9 +389,37 @@ function ReviewModal({ sessionId, onClose, onSaved }) {
     }
   }
 
-  const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+  const token = localStorage.getItem('exam_admin_token') || '';
+
+  async function handleMarkReviewed() {
+    setMarkingReviewed(true);
+    setError('');
+    try {
+      await markSessionReviewed(sessionId);
+      setData((prev) => ({ ...prev, reviewed: true }));
+      onSaved();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setMarkingReviewed(false);
+    }
+  }
+
+  /** Derive a card colour for a question based on answered / correct state */
+  function cardStyle(q) {
+    const answered = q.student_answer && q.student_answer.trim() !== '';
+    if (!answered) return 'bg-gray-800 border-gray-700'; // unanswered — neutral
+    // Correct: score equals max or (MCQ) answer matches key
+    const isCorrect =
+      q.score >= q.max_score ||
+      (q.question_type === 'mcq' && q.student_answer === q.answer_key);
+    if (isCorrect) return 'bg-emerald-950/60 border-emerald-700';
+    return 'bg-indigo-950/60 border-indigo-700'; // answered but not fully correct
+  }
 
   return (
+    <>
+    {lightbox && <ImageLightbox images={lightbox.images} startIndex={lightbox.startIndex} onClose={() => setLightbox(null)} />}
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-gray-900 rounded-xl border border-gray-700 shadow-2xl w-full max-w-3xl flex flex-col" style={{ maxHeight: '90vh' }}>
         {/* Header */}
@@ -394,7 +448,7 @@ function ReviewModal({ sessionId, onClose, onSaved }) {
             <p className="text-sm text-gray-500">Loading…</p>
           ) : (
             data.questions.map((q, idx) => (
-              <div key={q.question_id} className="bg-gray-800 rounded-xl border border-gray-700 p-4 flex flex-col gap-3">
+              <div key={q.question_id} className={`rounded-xl border p-4 flex flex-col gap-3 ${cardStyle(q)}`}>
                 <div className="flex items-start gap-2">
                   <span className="text-xs font-bold text-gray-500 mt-0.5">Q{idx + 1}</span>
                   <p className="flex-1 text-gray-200 text-sm font-medium">{q.question_text}</p>
@@ -413,7 +467,7 @@ function ReviewModal({ sessionId, onClose, onSaved }) {
                   </div>
                 )}
 
-                {q.question_type !== 'mcq' && q.question_type !== 'short_answer_screenshot' && !(q.question_type === 'short_answer' && q.student_answer && /^[0-9a-f\-]{36}\.\w+$/i.test(q.student_answer)) && (
+                {q.question_type !== 'mcq' && q.question_type !== 'short_answer_screenshot' && q.question_type !== 'practical_vm' && !(q.question_type === 'short_answer' && q.student_answer && /^[0-9a-f\-]{36}\.\w+$/i.test(q.student_answer)) && (
                   <div className="pl-5 flex flex-col gap-1 text-xs">
                     <p className="text-gray-400">Student answer:</p>
                     <p className="text-gray-200 font-medium whitespace-pre-wrap bg-gray-900 rounded px-2 py-1.5 border border-gray-700">
@@ -424,11 +478,35 @@ function ReviewModal({ sessionId, onClose, onSaved }) {
                   </div>
                 )}
 
+                {/* practical_vm: show all submitted screenshots with carousel */}
+                {q.question_type === 'practical_vm' && (() => {
+                  const shots = parsePracticalVmShots(q.student_answer);
+                  return (
+                    <div className="pl-5">
+                      <p className="text-xs text-gray-400 mb-2">
+                        Screenshots submitted: <span className="font-semibold text-indigo-300">{shots.length}</span>
+                      </p>
+                      {shots.length > 0 ? (
+                        <PracticalVmGallery
+                          shots={shots}
+                          token={token}
+                          apiBase={API_BASE}
+                          onOpenCarousel={setLightbox}
+                        />
+                      ) : (
+                        <p className="text-xs text-gray-500 italic">No screenshots uploaded.</p>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* short_answer_screenshot / short_answer with screenshot: single image */}
                 {(q.question_type === 'short_answer_screenshot' || (q.question_type === 'short_answer' && q.student_answer && /^[0-9a-f\-]{36}\.\w+$/i.test(q.student_answer))) && (
                   <div className="pl-5">
                     <p className="text-xs text-gray-400 mb-2">Screenshot submitted:</p>
                     {q.student_answer ? (
-                      <ScreenshotImage filename={q.student_answer} token={token} apiBase={API_BASE} />
+                      <ScreenshotImage filename={q.student_answer} token={token} apiBase={API_BASE}
+                        onOpenLightbox={(src) => setLightbox({ images: [src], startIndex: 0 })} />
                     ) : (
                       <p className="text-xs text-gray-500 italic">No screenshot uploaded.</p>
                     )}
@@ -460,7 +538,20 @@ function ReviewModal({ sessionId, onClose, onSaved }) {
           )}
         </div>
 
-        <div className="flex justify-end px-6 py-4 border-t border-gray-700">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-700">
+          <div>
+            {data && !data.reviewed && (
+              <button
+                onClick={handleMarkReviewed}
+                disabled={markingReviewed}
+                className="px-4 py-2 rounded-lg text-sm bg-emerald-700 hover:bg-emerald-600 text-white font-semibold transition disabled:opacity-50">
+                {markingReviewed ? 'Saving…' : '✓ Save & Mark as Reviewed'}
+              </button>
+            )}
+            {data?.reviewed && (
+              <span className="text-sm text-emerald-400 font-semibold">✓ Reviewed</span>
+            )}
+          </div>
           <button onClick={onClose}
             className="px-4 py-2 rounded-lg text-sm bg-gray-700 text-gray-300 hover:bg-gray-600 border border-gray-600 transition">
             Close
@@ -468,11 +559,185 @@ function ReviewModal({ sessionId, onClose, onSaved }) {
         </div>
       </div>
     </div>
+    </>
+  );
+}
+
+// ── Image lightbox with carousel, pinch/scroll zoom ──────────────────────────
+// `images` = array of src strings, `startIndex` = which to open first
+function ImageLightbox({ images, startIndex = 0, onClose }) {
+  const [idx, setIdx]   = useState(startIndex);
+  const [zoom, setZoom] = useState(1);
+  const [pos, setPos]   = useState({ x: 0, y: 0 });
+  const dragging        = useRef(false);
+  const dragStart       = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+
+  const src = images[idx];
+
+  // Reset zoom/pan when switching images
+  useEffect(() => { setZoom(1); setPos({ x: 0, y: 0 }); }, [idx]);
+
+  // Close on Escape, arrow keys for navigation
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowRight') setIdx((i) => Math.min(i + 1, images.length - 1));
+      if (e.key === 'ArrowLeft')  setIdx((i) => Math.max(i - 1, 0));
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose, images.length]);
+
+  function handleWheel(e) {
+    e.preventDefault();
+    setZoom((z) => Math.min(8, Math.max(0.5, z - e.deltaY * 0.001)));
+  }
+  function handleMouseDown(e) {
+    if (e.button !== 0) return;
+    dragging.current = true;
+    dragStart.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y };
+  }
+  function handleMouseMove(e) {
+    if (!dragging.current) return;
+    setPos({ x: dragStart.current.px + e.clientX - dragStart.current.mx, y: dragStart.current.py + e.clientY - dragStart.current.my });
+  }
+  function handleMouseUp() { dragging.current = false; }
+  function resetZoom() { setZoom(1); setPos({ x: 0, y: 0 }); }
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/90"
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    >
+      {/* Top toolbar */}
+      <div className="absolute top-4 right-4 flex gap-2 z-10">
+        <button onClick={() => setZoom((z) => Math.min(8, z + 0.5))}
+          className="px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold">+</button>
+        <button onClick={() => setZoom((z) => Math.max(0.5, z - 0.5))}
+          className="px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold">−</button>
+        <button onClick={resetZoom}
+          className="px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold">1:1</button>
+        <button onClick={onClose}
+          className="px-3 py-1.5 rounded bg-red-700 hover:bg-red-600 text-white text-sm font-bold">✕ Close</button>
+      </div>
+      <p className="absolute top-4 left-4 text-xs text-gray-400 select-none">
+        {images.length > 1 && <span className="mr-3">📷 {idx + 1} / {images.length}  ·  ← → keys to navigate  ·  </span>}
+        Scroll to zoom · Drag to pan · {Math.round(zoom * 100)}%
+      </p>
+
+      {/* Prev / Next arrows */}
+      {images.length > 1 && (
+        <>
+          <button
+            onClick={() => setIdx((i) => Math.max(i - 1, 0))}
+            disabled={idx === 0}
+            className="absolute left-4 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-gray-700/80 hover:bg-gray-600 text-white text-xl disabled:opacity-30 disabled:cursor-not-allowed transition"
+          >‹</button>
+          <button
+            onClick={() => setIdx((i) => Math.min(i + 1, images.length - 1))}
+            disabled={idx === images.length - 1}
+            className="absolute right-4 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-gray-700/80 hover:bg-gray-600 text-white text-xl disabled:opacity-30 disabled:cursor-not-allowed transition"
+          >›</button>
+        </>
+      )}
+
+      {/* Image */}
+      <div
+        className="overflow-hidden w-full h-full flex items-center justify-center cursor-grab active:cursor-grabbing"
+        onWheel={handleWheel}
+      >
+        <img
+          src={src}
+          alt={`Screenshot ${idx + 1}`}
+          draggable={false}
+          onMouseDown={handleMouseDown}
+          style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${zoom})`, transformOrigin: 'center', transition: dragging.current ? 'none' : 'transform 0.1s ease', maxWidth: '100vw', maxHeight: '100vh', objectFit: 'contain', userSelect: 'none' }}
+        />
+      </div>
+
+      {/* Dot indicators */}
+      {images.length > 1 && (
+        <div className="absolute bottom-5 flex gap-2 z-10">
+          {images.map((_, i) => (
+            <button key={i} onClick={() => setIdx(i)}
+              className={`w-2.5 h-2.5 rounded-full transition ${i === idx ? 'bg-indigo-400 scale-125' : 'bg-gray-600 hover:bg-gray-400'}`} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Gallery component for practical_vm: fetches all shots, supports carousel ──
+function PracticalVmGallery({ shots, token, apiBase, onOpenCarousel }) {
+  // srcs: { [filename]: blobUrl | 'error' }
+  const [srcs, setSrcs] = useState({});
+
+  useEffect(() => {
+    const revoke = [];
+    shots.forEach((fname) => {
+      fetch(`${apiBase}/api/admin/screenshots/${encodeURIComponent(fname)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((r) => { if (!r.ok) throw new Error('err'); return r.blob(); })
+        .then((blob) => {
+          const url = URL.createObjectURL(blob);
+          revoke.push(url);
+          setSrcs((prev) => ({ ...prev, [fname]: url }));
+        })
+        .catch(() => setSrcs((prev) => ({ ...prev, [fname]: 'error' })));
+    });
+    return () => revoke.forEach((u) => URL.revokeObjectURL(u));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shots.join(','), token, apiBase]);
+
+  function openAt(index) {
+    const images = shots.map((f) => srcs[f]).filter((s) => s && s !== 'error');
+    // find real index after filtering errors
+    let realIndex = 0;
+    let count = 0;
+    for (let i = 0; i < shots.length; i++) {
+      if (srcs[shots[i]] && srcs[shots[i]] !== 'error') {
+        if (i === index) { realIndex = count; break; }
+        count++;
+      }
+    }
+    if (images.length > 0) onOpenCarousel({ images, startIndex: realIndex });
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {shots.map((fname, i) => {
+        const s = srcs[fname];
+        return (
+          <div key={i}>
+            <p className="text-xs text-gray-500 mb-1 font-mono">#{i + 1} — {fname}</p>
+            {!s && <p className="text-xs text-gray-500 italic">Loading image…</p>}
+            {s === 'error' && <p className="text-xs text-red-400">Could not load screenshot.</p>}
+            {s && s !== 'error' && (
+              <div className="relative group inline-block">
+                <img
+                  src={s}
+                  alt={`Screenshot ${i + 1}`}
+                  className="max-w-full max-h-80 rounded border border-gray-600 object-contain cursor-zoom-in hover:opacity-90 transition"
+                  onClick={() => openAt(i)}
+                />
+                <span className="absolute bottom-1 right-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                  🔍 Click to enlarge{shots.length > 1 ? ` (${shots.length} screenshots)` : ''}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
 // ── Screenshot image helper (fetches with auth header) ────────────────────────
-function ScreenshotImage({ filename, token, apiBase }) {
+function ScreenshotImage({ filename, token, apiBase, onOpenLightbox }) {
   const [src, setSrc] = useState(null);
 
   useEffect(() => {
@@ -489,10 +754,14 @@ function ScreenshotImage({ filename, token, apiBase }) {
   if (!src) return <p className="text-xs text-gray-500 italic">Loading image…</p>;
   if (src === 'error') return <p className="text-xs text-red-400">Could not load screenshot.</p>;
   return (
-    <img
-      src={src}
-      alt="Student screenshot"
-      className="max-w-full max-h-80 rounded border border-gray-600 object-contain"
-    />
+    <div className="relative group inline-block">
+      <img
+        src={src}
+        alt="Student screenshot"
+        className="max-w-full max-h-80 rounded border border-gray-600 object-contain cursor-zoom-in hover:opacity-90 transition"
+        onClick={() => onOpenLightbox && onOpenLightbox(src)}
+      />
+      <span className="absolute bottom-1 right-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition pointer-events-none">🔍 Click to enlarge</span>
+    </div>
   );
 }

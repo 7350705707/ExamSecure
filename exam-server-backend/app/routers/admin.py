@@ -60,6 +60,8 @@ async def create_exam(body: CreateExamRequest, request: Request, admin: dict = D
         questions_json=questions_json,
         created_by=admin["id"],
         fitb_hint_enabled=1 if body.fitb_hint_enabled else 0,
+        practical_url=body.practical_url,
+        allow_url_bar=1 if body.allow_url_bar else 0,
     )
     audit_log("EXAM_CREATE", admin["username"], _ip(request), f"exam_id={exam_id}")
     return {"id": exam_id, "message": "Exam created as draft."}
@@ -94,6 +96,10 @@ async def update_exam(exam_id: int, body: UpdateExamRequest, request: Request, a
         fields["questions_json"] = json.dumps([q.model_dump() for q in body.questions])
     if body.fitb_hint_enabled is not None:
         fields["fitb_hint_enabled"] = 1 if body.fitb_hint_enabled else 0
+    if body.practical_url is not None:
+        fields["practical_url"] = body.practical_url
+    if body.allow_url_bar is not None:
+        fields["allow_url_bar"] = 1 if body.allow_url_bar else 0
     await db.update_exam(exam_id, **fields)
     # Reset all existing sessions so students can retake with the new version
     reset_count = await db.reset_exam_sessions(exam_id)
@@ -278,6 +284,37 @@ async def delete_user(user_id: int, request: Request, admin: dict = Depends(requ
     logger.info("User deleted: id=%d by admin=%s", user_id, admin["username"])
 
 
+@router.put("/users/{user_id}/password", status_code=200)
+async def reset_user_password(user_id: int, body: dict, request: Request, admin: dict = Depends(require_admin)):
+    """Allow an admin to set a new password for any user."""
+    new_password = str(body.get("new_password", "")).strip()
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    target = await db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found.")
+    await db.update_user_password(user_id, hash_password(new_password), clear_must_change=True)
+    audit_log("USER_PASSWORD_RESET", admin["username"], _ip(request),
+              f"target_user_id={user_id} target_username={target['username']}")
+    return {"message": "Password updated."}
+
+
+@router.put("/users/{user_id}/active", status_code=200)
+async def set_user_active(user_id: int, body: dict, request: Request, admin: dict = Depends(require_admin)):
+    """Activate or deactivate a user account."""
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=400, detail="Cannot deactivate your own account.")
+    target = await db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found.")
+    active = bool(body.get("active", True))
+    await db.set_user_active(user_id, active)
+    action = "ACTIVATE" if active else "DEACTIVATE"
+    audit_log(f"USER_{action}", admin["username"], _ip(request),
+              f"target_user_id={user_id} target_username={target['username']}")
+    return {"message": f"User {'activated' if active else 'deactivated'}."}
+
+
 @router.put("/users/{user_id}/group", status_code=200)
 async def assign_user_group(user_id: int, body: dict, request: Request, admin: dict = Depends(require_admin)):
     """Assign or remove a user from a group. Pass group_id=null to unassign."""
@@ -404,6 +441,17 @@ def _exam_needs_review(exam: dict) -> bool:
     """True if exam contains short_answer questions requiring manual instructor review."""
     questions = json.loads(exam.get("questions_json", "[]"))
     return any(q.get("type") in ("short_answer", "short_answer_screenshot") for q in questions)
+
+
+@router.post("/results/{session_id}/mark-reviewed")
+async def mark_session_reviewed(session_id: int, request: Request, admin: dict = Depends(require_admin)):
+    """Mark a session as reviewed by the instructor (after scoring manual questions)."""
+    session = await db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await db.mark_session_reviewed(session_id)
+    audit_log("SESSION_REVIEWED", admin["username"], _ip(request), f"session_id={session_id}")
+    return {"message": "Session marked as reviewed."}
 
 
 @router.post("/results/{session_id}/release")

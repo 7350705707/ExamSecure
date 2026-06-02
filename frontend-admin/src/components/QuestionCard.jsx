@@ -5,6 +5,7 @@ const TYPE_COLORS = {
   true_false:               'bg-sky-100 text-sky-600 border-sky-200',
   fill_blank:               'bg-amber-100 text-amber-700 border-amber-200',
   short_answer:             'bg-violet-100 text-violet-600 border-violet-200',
+  practical_vm:             'bg-orange-100 text-orange-600 border-orange-200',
 };
 
 export default function QuestionCard({ question: q, index, onEdit, onDelete }) {

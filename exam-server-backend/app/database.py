@@ -117,7 +117,9 @@ async def async_init_db() -> None:
         cur = await con.execute("PRAGMA table_info(exams)")
         exam_cols = [r[1] for r in await cur.fetchall()]
         for col, ddl in [
-            ("fitb_hint_enabled", "ALTER TABLE exams ADD COLUMN fitb_hint_enabled INTEGER NOT NULL DEFAULT 0"),
+            ("fitb_hint_enabled",   "ALTER TABLE exams ADD COLUMN fitb_hint_enabled INTEGER NOT NULL DEFAULT 0"),
+            ("practical_url",       "ALTER TABLE exams ADD COLUMN practical_url TEXT NOT NULL DEFAULT ''"),
+            ("allow_url_bar",       "ALTER TABLE exams ADD COLUMN allow_url_bar INTEGER NOT NULL DEFAULT 1"),
         ]:
             if col not in exam_cols:
                 logger.info("DB migration: adding %s column to exams table", col)
@@ -275,6 +277,12 @@ async def assign_user_group(user_id: int, group_id: Optional[int]) -> None:
         logger.info("User %d assigned to group %s", user_id, group_id)
 
 
+async def set_user_active(user_id: int, active: bool) -> None:
+    async with _conn() as con:
+        await con.execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
+        logger.info("User %d active set to %s", user_id, active)
+
+
 async def update_user_password(user_id: int, new_hash: str, clear_must_change: bool = True) -> None:
     async with _conn() as con:
         if clear_must_change:
@@ -313,6 +321,13 @@ async def release_result(session_id: int) -> None:
         logger.info("Result released for session_id=%d", session_id)
 
 
+async def mark_session_reviewed(session_id: int) -> None:
+    """Mark a session as reviewed by the instructor."""
+    async with _conn() as con:
+        await con.execute("UPDATE exam_sessions SET reviewed=1 WHERE id=?", (session_id,))
+        logger.info("Session reviewed: session_id=%d", session_id)
+
+
 async def release_results_for_group(exam_id: int, group_id: Optional[int], require_reviewed: bool = False) -> int:
     """Release all results for a group (or all students) in a specific exam.
     When require_reviewed=True, only sessions already marked reviewed are released.
@@ -349,15 +364,19 @@ async def create_exam(
     questions_json: str,
     created_by: int,
     fitb_hint_enabled: int = 0,
+    practical_url: str = "",
+    allow_url_bar: int = 1,
 ) -> int:
     now = _now()
     async with _conn() as con:
         cur = await con.execute(
             """INSERT INTO exams (title, course_name, level, duration_minutes,
-               total_marks, status, questions_json, created_by, created_at, updated_at, fitb_hint_enabled)
-               VALUES (?,?,?,?,?,'draft',?,?,?,?,?)""",
+               total_marks, status, questions_json, created_by, created_at, updated_at,
+               fitb_hint_enabled, practical_url, allow_url_bar)
+               VALUES (?,?,?,?,?,'draft',?,?,?,?,?,?,?)""",
             (title, course_name, level, duration_minutes, total_marks,
-             questions_json, created_by, now, now, fitb_hint_enabled),
+             questions_json, created_by, now, now, fitb_hint_enabled,
+             practical_url, allow_url_bar),
         )
         eid = cur.lastrowid
         logger.info("Exam created: id=%d title=%r by user=%d", eid, title, created_by)
@@ -576,7 +595,7 @@ async def list_sessions_admin(exam_id: Optional[int] = None) -> list:
         if exam_id:
             cur = await con.execute(
                 """SELECT es.*, u.username, u.full_name, u.rank, u.unit,
-                          e.title as exam_title, e.total_marks as exam_total_marks
+                          e.title as exam_title, e.total_marks as total_marks
                    FROM exam_sessions es
                    JOIN users u ON u.id = es.student_id
                    JOIN exams e ON e.id = es.exam_id
@@ -587,7 +606,7 @@ async def list_sessions_admin(exam_id: Optional[int] = None) -> list:
         else:
             cur = await con.execute(
                 """SELECT es.*, u.username, u.full_name, u.rank, u.unit,
-                          e.title as exam_title, e.total_marks as exam_total_marks
+                          e.title as exam_title, e.total_marks as total_marks
                    FROM exam_sessions es
                    JOIN users u ON u.id = es.student_id
                    JOIN exams e ON e.id = es.exam_id

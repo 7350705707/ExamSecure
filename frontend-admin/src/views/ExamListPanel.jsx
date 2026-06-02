@@ -109,7 +109,7 @@ function ActionBtn({ label, color, onClick }) {
 
 function ErrBanner({ msg, onClose }) {
   return (
-    <div className="bg-red-50 border border-red-300 text-red-700 rounded-lg px-4 py-2 text-sm flex justify-between">
+    <div className="bg-red-950 border border-red-700 text-red-300 rounded-lg px-4 py-2 text-sm flex justify-between">
       <span>{msg}</span>
       <button onClick={onClose} className="ml-4 font-bold">×</button>
     </div>

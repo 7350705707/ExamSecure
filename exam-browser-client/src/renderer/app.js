@@ -15,6 +15,9 @@ let secondsLeft   = 0;
 let autoSaveInterval = null;  // for periodic answer auto-save
 let _warned5min = false;      // timer warning flags
 let _warned1min = false;
+const practicalVmScreenshots = {};    // keyed by q.id → [filename, …] across the exam session
+let _vmScreenshotListenerDone = false; // register onProxmoxScreenshot listener only once
+let _vmConsoleClosedListenerDone = false; // register onProxmoxConsoleClosed listener only once
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Screens
@@ -359,6 +362,50 @@ function startExamScreen() {
   _warned5min = false;
   _warned1min = false;
 
+  // Reset per-question screenshot lists for a fresh exam session
+  Object.keys(practicalVmScreenshots).forEach((k) => delete practicalVmScreenshots[k]);
+
+  // Register the Proxmox screenshot listener exactly once for the app's lifetime
+  if (!_vmScreenshotListenerDone && window.examBridge && window.examBridge.onProxmoxScreenshot) {
+    _vmScreenshotListenerDone = true;
+    window.examBridge.onProxmoxScreenshot(async (base64) => {
+      const q = examData && examData.questions[currentIdx];
+      if (!q || q.type !== "practical_vm") return;
+      const qId = q.id;
+      const statusEl = $(`vm-status-${qId}`);
+      if (statusEl) { statusEl.textContent = "Uploading screenshot\u2026"; statusEl.className = "vm-status"; }
+      try {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: "image/png" });
+        const file = new File([blob], "screen.png", { type: "image/png" });
+        const filename = await uploadScreenshot(file);
+        if (!practicalVmScreenshots[qId]) practicalVmScreenshots[qId] = [];
+        practicalVmScreenshots[qId].push(filename);
+        answers[qId] = JSON.stringify(practicalVmScreenshots[qId]);
+        updateNav();
+        refreshVmScreenshotGallery(qId);
+        const count = practicalVmScreenshots[qId].length;
+        if (statusEl) {
+          statusEl.textContent = `\u2713 ${count} screenshot${count > 1 ? "s" : ""} captured and saved.`;
+          statusEl.className = "vm-status vm-status-ok";
+        }
+      } catch (err) {
+        if (statusEl) { statusEl.textContent = `\u2717 Upload failed: ${err.message}`; statusEl.className = "vm-status vm-status-err"; }
+      }
+    });
+  }
+
+  // When the Proxmox console window is closed, just continue the exam
+  // (do NOT log the student out — the exam should carry on)
+  if (!_vmConsoleClosedListenerDone && window.examBridge && window.examBridge.onProxmoxConsoleClosed) {
+    _vmConsoleClosedListenerDone = true;
+    window.examBridge.onProxmoxConsoleClosed(() => {
+      // Console popup closed — exam continues; nothing to do here
+    });
+  }
+
   // Header
   $("header-title").textContent  = examData.title;
   $("sidebar-title").textContent = examData.title;
@@ -433,7 +480,7 @@ function renderQuestion(idx) {
   }
 
   // Hide all answer inputs
-  ["q-options", "q-tf", "q-textarea", "q-screenshot", "q-fill-wrap"].forEach((id) => {
+  ["q-options", "q-tf", "q-textarea", "q-screenshot", "q-fill-wrap", "q-vm-task"].forEach((id) => {
     const el = $(id); if (el) el.classList.add("hidden");
   });
 
@@ -526,38 +573,54 @@ function renderQuestion(idx) {
     ta.classList.remove("hidden");
     ta.value = saved || '';
     ta.oninput = () => { answers[q.id] = ta.value; updateNav(); };
-    // Also show optional screenshot section
-    const ssEl = $("q-screenshot");
-    if (ssEl) {
-      ssEl.classList.remove("hidden");
-      const fileInput  = ssEl.querySelector(".ss-file-input");
-      const previewImg = ssEl.querySelector(".ss-preview");
-      const statusEl   = ssEl.querySelector(".ss-status");
-      if (statusEl && !ssEl._labelled) {
-        ssEl._labelled = true;
-        const lbl = ssEl.querySelector(".screenshot-label");
-        if (lbl) lbl.textContent = "Optional: attach a screenshot";
+  } else if (q.type === "practical_vm") {
+    // ── Practical VM: open Proxmox popup window, capture multiple screenshots ──
+    const vmEl = $("q-vm-task");
+    if (vmEl) {
+      vmEl.classList.remove("hidden");
+
+      // Restore screenshot list from the saved answer when revisiting this question
+      if (!practicalVmScreenshots[q.id]) {
+        if (saved) {
+          try { practicalVmScreenshots[q.id] = JSON.parse(saved); }
+          catch { practicalVmScreenshots[q.id] = saved.split(",").filter((f) => /^[0-9a-f\-]{36}\.\w+$/i.test(f)); }
+        } else {
+          practicalVmScreenshots[q.id] = [];
+        }
+        if (practicalVmScreenshots[q.id].length > 0) {
+          answers[q.id] = JSON.stringify(practicalVmScreenshots[q.id]);
+        }
       }
-      if (fileInput) {
-        fileInput.onchange = async () => {
-          const file = fileInput.files[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = (ev) => { if (previewImg) { previewImg.src = ev.target.result; previewImg.classList.remove("hidden"); } };
-          reader.readAsDataURL(file);
-          if (statusEl) statusEl.textContent = "Uploading\u2026";
-          try {
-            const filename = await uploadScreenshot(file);
-            // Store screenshot filename as a note — text answer takes priority
-            if (statusEl) statusEl.textContent = `\u2713 Screenshot attached: ${filename}`;
-            // Append a reference to the textarea if it's empty
-            if (!answers[q.id]) { answers[q.id] = filename; }
-            updateNav();
-          } catch (err) {
-            if (statusEl) statusEl.textContent = `Upload failed: ${err.message}`;
-          }
-        };
-      }
+
+      const shots = practicalVmScreenshots[q.id];
+      vmEl.innerHTML = `
+        <p class="vm-instructions">
+          Click <strong>Open Exam Browser</strong> to complete the Proxmox task in a separate window.<br>
+          Use the <strong>\u{1F4F8} Screenshot &amp; Save</strong> button inside that window to capture evidence.<br>
+          You may take <strong>multiple screenshots</strong> \u2014 all will be submitted for review.
+        </p>
+        <div class="vm-action-row">
+          <button id="vm-open-btn-${q.id}" class="vm-btn-open-browser">\u{1F5A5} Open Exam Browser</button>
+        </div>
+        <div class="vm-gallery-wrap">
+          <p class="vm-gallery-heading">\u{1F4F8} Captured Screenshots (<span id="vm-count-${q.id}">${shots.length}</span>)</p>
+          <div id="vm-gallery-${q.id}" class="vm-gallery"></div>
+        </div>
+        <div id="vm-status-${q.id}" class="vm-status ${shots.length > 0 ? "vm-status-ok" : ""}">
+          ${shots.length > 0
+            ? `\u2713 ${shots.length} screenshot${shots.length > 1 ? "s" : ""} captured and saved.`
+            : "No screenshots captured yet \u2014 open the browser and use the Screenshot button."}
+        </div>
+      `;
+
+      refreshVmScreenshotGallery(q.id);
+
+      $(`vm-open-btn-${q.id}`).addEventListener("click", () => {
+        window.examBridge.openProxmoxWindow(
+          examData.practical_url || '',
+          examData.allow_url_bar !== false
+        );
+      });
     }
   } else {
     // fill_blank: use hint datalist if enabled, otherwise plain textarea
@@ -596,6 +659,43 @@ function renderQuestion(idx) {
   updateNav();
 }
 
+// ── Refresh the screenshot gallery list for a practical_vm question ───────────
+function refreshVmScreenshotGallery(qId) {
+  const gallery = $(`vm-gallery-${qId}`);
+  const countEl = $(`vm-count-${qId}`);
+  if (!gallery) return;
+  const shots = practicalVmScreenshots[qId] || [];
+  if (countEl) countEl.textContent = shots.length;
+  if (shots.length === 0) {
+    gallery.innerHTML = '<p class="vm-gallery-empty">No screenshots yet.</p>';
+    return;
+  }
+  gallery.innerHTML = shots.map((fname, i) => `
+    <div class="vm-gallery-item">
+      <span class="vm-gallery-num">#${i + 1}</span>
+      <span class="vm-gallery-fname">${escapeHtml(fname)}</span>
+      <button class="vm-gallery-del" data-qid="${escapeHtml(String(qId))}" data-idx="${i}" title="Remove this screenshot">\u2715</button>
+    </div>
+  `).join("");
+  gallery.querySelectorAll(".vm-gallery-del").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.idx, 10);
+      practicalVmScreenshots[qId].splice(idx, 1);
+      const remaining = practicalVmScreenshots[qId].length;
+      answers[qId] = remaining > 0 ? JSON.stringify(practicalVmScreenshots[qId]) : "";
+      updateNav();
+      refreshVmScreenshotGallery(qId);
+      const statusEl = $(`vm-status-${qId}`);
+      if (statusEl) {
+        statusEl.textContent = remaining > 0
+          ? `\u2713 ${remaining} screenshot${remaining > 1 ? "s" : ""} captured and saved.`
+          : "No screenshots captured yet \u2014 open the browser and use the Screenshot button.";
+        statusEl.className = remaining > 0 ? "vm-status vm-status-ok" : "vm-status";
+      }
+    });
+  });
+}
+
 function renderFitbHints(pool, query, panel) {
   if (!panel || pool.length === 0) return;
   const q = query.toLowerCase();
@@ -625,8 +725,10 @@ function saveCurrentAnswer() {
       answers[q.id] = $("q-textarea").value || answers[q.id] || "";
     }
   }
+  // practical_vm answers are stored directly when screenshot is captured — no save needed
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Upload screenshot to server and return filename
 async function uploadScreenshot(file) {
   const ALLOWED = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];

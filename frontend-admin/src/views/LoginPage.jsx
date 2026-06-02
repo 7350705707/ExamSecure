@@ -27,9 +27,9 @@ export default function LoginPage({ onLogin }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-indigo-50">
+    <div className="min-h-screen flex items-center justify-center bg-gray-950">
       <div className="w-full max-w-md">
-        <div className="bg-white rounded-xl border border-gray-700 shadow p-8 flex flex-col gap-5">
+          <div className="bg-gray-800 rounded-xl border border-gray-700 shadow p-8 flex flex-col gap-5">
           {/* Logo */}
           <div className="flex flex-col items-center gap-2 mb-1">
             <img src={mcteLogo} alt="MCTE Logo" className="h-16 w-auto object-contain" />
@@ -41,7 +41,7 @@ export default function LoginPage({ onLogin }) {
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-300 text-red-700 rounded-lg px-4 py-2 text-sm">
+            <div className="bg-red-950 border border-red-700 text-red-300 rounded-lg px-4 py-2 text-sm">
               {error}
             </div>
           )}

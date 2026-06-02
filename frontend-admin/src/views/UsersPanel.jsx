@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import {
   listUsers, createUser, deleteUser, assignUserGroup,
   listGroups, createGroup, deleteGroup, bulkImportUsers,
+  getStoredUser, resetUserPassword, setUserActive,
 } from '../services/index.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -21,11 +22,13 @@ export default function UsersPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [tab, setTab]         = useState('users'); // 'users' | 'groups'
+  const currentAdmin = getStoredUser();
 
   // Modals
-  const [showAddUser, setShowAddUser]       = useState(false);
-  const [showAddGroup, setShowAddGroup]     = useState(false);
+  const [showAddUser, setShowAddUser]         = useState(false);
+  const [showAddGroup, setShowAddGroup]       = useState(false);
   const [showImportUsers, setShowImportUsers] = useState(false);
+  const [resetPwdUser, setResetPwdUser]       = useState(null); // { id, username }
 
   function downloadDemoExcel() {
     const wb = XLSX.utils.book_new();
@@ -79,6 +82,14 @@ export default function UsersPanel() {
     catch (e) { setError(e.message); }
   }
 
+  async function handleToggleActive(id, currentActive) {
+    const action = currentActive ? 'deactivate' : 'activate';
+    const uname = users.find((u) => u.id === id)?.username || id;
+    if (!confirm(`${currentActive ? 'Deactivate' : 'Activate'} account "${uname}"?`)) return;
+    try { await setUserActive(id, !currentActive); load(); }
+    catch (e) { setError(e.message); }
+  }
+
   return (
     <div className="flex-1 flex flex-col gap-4 p-6 overflow-y-auto">
       {/* Header */}
@@ -126,7 +137,7 @@ export default function UsersPanel() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-300 text-red-700 rounded-lg px-4 py-2 text-sm flex justify-between">
+        <div className="bg-red-950 border border-red-700 text-red-300 rounded-lg px-4 py-2 text-sm flex justify-between">
           <span>{error}</span>
           <button onClick={() => setError('')} className="ml-4 font-bold">×</button>
         </div>
@@ -159,7 +170,12 @@ export default function UsersPanel() {
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-gray-200 truncate">{u.full_name || u.username}</p>
                       <p className="text-xs text-gray-400 truncate font-mono">{u.username}</p>
-                      <p className="text-xs text-gray-500 capitalize">{u.role}</p>
+                      <p className="text-xs capitalize flex items-center gap-1.5">
+                        <span className="text-gray-500">{u.role}</span>
+                        {!u.active && (
+                          <span className="px-1.5 py-0.5 rounded text-xs bg-red-900/60 text-red-400 border border-red-700 font-semibold">Inactive</span>
+                        )}
+                      </p>
                     </div>
                     {/* Group assignment dropdown */}
                     <select
@@ -172,7 +188,23 @@ export default function UsersPanel() {
                         <option key={gr.id} value={gr.id}>{gr.name}</option>
                       ))}
                     </select>
-                    {u.role !== 'admin' && (
+                    {u.id !== currentAdmin?.id && (
+                      <button onClick={() => setResetPwdUser({ id: u.id, username: u.username })}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition">
+                        Reset Pwd
+                      </button>
+                    )}
+                    {u.id !== currentAdmin?.id && (
+                      <button onClick={() => handleToggleActive(u.id, !!u.active)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                          u.active
+                            ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                        }`}>
+                        {u.active ? 'Deactivate' : 'Activate'}
+                      </button>
+                    )}
+                    {u.id !== currentAdmin?.id && (
                       <button onClick={() => handleDeleteUser(u.id, u.username)}
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition">
                         Delete
@@ -205,6 +237,15 @@ export default function UsersPanel() {
         </div>
       )}
 
+      {/* Reset Password modal */}
+      {resetPwdUser && (
+        <ResetPasswordModal
+          user={resetPwdUser}
+          onClose={() => setResetPwdUser(null)}
+          onError={setError}
+        />
+      )}
+
       {/* Import Users modal */}
       {showImportUsers && (
         <BulkImportModal
@@ -233,6 +274,71 @@ export default function UsersPanel() {
           onError={setError}
         />
       )}
+    </div>
+  );
+}
+
+// ── Reset Password modal ──────────────────────────────────────────────────────
+function ResetPasswordModal({ user, onClose, onError }) {
+  const [pwd, setPwd]       = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [done, setDone]     = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (pwd.length < 8) { onError('Password must be at least 8 characters.'); return; }
+    if (pwd !== confirm) { onError('Passwords do not match.'); return; }
+    setSaving(true);
+    try {
+      await resetUserPassword(user.id, pwd);
+      setDone(true);
+    } catch (err) {
+      onError(err.message);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-gray-900 rounded-xl border border-gray-700 shadow-2xl w-full max-w-sm p-6 flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-gray-100">Reset Password</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-200 font-bold text-xl">&times;</button>
+        </div>
+        {done ? (
+          <>
+            <p className="text-emerald-400 text-sm">✓ Password updated for <strong>{user.username}</strong>.</p>
+            <button onClick={onClose} className="mt-2 px-4 py-2 rounded-lg bg-gray-700 text-gray-200 text-sm font-semibold hover:bg-gray-600 transition">Close</button>
+          </>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            <p className="text-sm text-gray-400">Set a new password for <strong className="text-gray-200">{user.username}</strong>.</p>
+            <input
+              type="password" required minLength={8} placeholder="New password (min 8 chars)"
+              value={pwd} onChange={(e) => setPwd(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-600 bg-gray-800 text-gray-200 text-sm outline-none focus:border-indigo-400"
+            />
+            <input
+              type="password" required minLength={8} placeholder="Confirm new password"
+              value={confirm} onChange={(e) => setConfirm(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-600 bg-gray-800 text-gray-200 text-sm outline-none focus:border-indigo-400"
+            />
+            <div className="flex gap-2 justify-end pt-1">
+              <button type="button" onClick={onClose}
+                className="px-4 py-2 rounded-lg bg-gray-700 text-gray-300 text-sm font-semibold hover:bg-gray-600 border border-gray-600 transition">
+                Cancel
+              </button>
+              <button type="submit" disabled={saving}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition disabled:opacity-50">
+                {saving ? 'Saving…' : 'Set Password'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { getExam, createExam, updateExam } from '../services/index.js';
+import { getExam, createExam, updateExam, listResults } from '../services/index.js';
 import QuestionCard from '../components/QuestionCard.jsx';
 
 const BLANK_EXAM = {
   title: '', course_name: '', description: '',
   duration_minutes: 60, pass_marks: 0, total_marks: 0, instructions: '', questions: [],
   fitb_hint_enabled: false,
+  practical_url: '', allow_url_bar: true,
 };
 
 const BLANK_Q = {
@@ -19,6 +20,7 @@ export default function ExamEditorPanel({ examId, onSaved }) {
   const [qForm, setQForm]       = useState(null);
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState('');
+  const [attemptCount, setAttemptCount] = useState(0);
   const isNew = !examId;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -28,7 +30,7 @@ export default function ExamEditorPanel({ examId, onSaved }) {
 
   const emptyAnswerErrors = form.questions
     .map((q, i) => ({ q, i }))
-    .filter(({ q }) => q.type !== 'short_answer' && (!q.answer_key || !String(q.answer_key).trim()));
+    .filter(({ q }) => q.type !== 'short_answer' && q.type !== 'practical_vm' && (!q.answer_key || !String(q.answer_key).trim()));
 
   const hasSaveBlocker = mcqOptionWarnings.length > 0 || emptyAnswerErrors.length > 0;
 
@@ -37,8 +39,12 @@ export default function ExamEditorPanel({ examId, onSaved }) {
       getExam(examId)
         .then((e) => setForm({ ...e, questions: e.questions || [] }))
         .catch((err) => setError(err.message));
+      listResults(examId)
+        .then((results) => setAttemptCount(results.length))
+        .catch(() => {});
     } else {
       setForm({ ...BLANK_EXAM });
+      setAttemptCount(0);
     }
   }, [examId]);
 
@@ -109,10 +115,21 @@ export default function ExamEditorPanel({ examId, onSaved }) {
         </div>
       </div>
 
-      {error && <div className="bg-red-50 border border-red-300 text-red-700 rounded-lg px-4 py-2 text-sm">{error}</div>}
+      {error && <div className="bg-red-950 border border-red-700 text-red-300 rounded-lg px-4 py-2 text-sm">{error}</div>}
+
+      {!isNew && attemptCount > 0 && (
+        <div className="bg-amber-950 border border-amber-600 text-amber-300 rounded-lg px-4 py-3 text-sm flex items-start gap-2">
+          <span className="text-amber-400 text-base mt-0.5">⚠</span>
+          <span>
+            <strong className="text-amber-200">Warning:</strong> This exam has{' '}
+            <strong className="text-amber-200">{attemptCount} student submission{attemptCount !== 1 ? 's' : ''}</strong>.
+            Saving changes will <strong className="text-amber-200">reset all existing sessions</strong> and students will need to retake the exam.
+          </span>
+        </div>
+      )}
 
       {mcqOptionWarnings.length > 0 && (
-        <div className="bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-2 text-sm flex items-start gap-2">
+        <div className="bg-amber-950 border border-amber-700 text-amber-300 rounded-lg px-4 py-2 text-sm flex items-start gap-2">
           <span className="mt-0.5">⚠</span>
           <span>
             {mcqOptionWarnings.length} MCQ question{mcqOptionWarnings.length !== 1 ? 's' : ''} (
@@ -122,7 +139,7 @@ export default function ExamEditorPanel({ examId, onSaved }) {
       )}
 
       {emptyAnswerErrors.length > 0 && (
-        <div className="bg-red-50 border border-red-300 text-red-700 rounded-lg px-4 py-2 text-sm flex items-start gap-2">
+        <div className="bg-red-950 border border-red-700 text-red-300 rounded-lg px-4 py-2 text-sm flex items-start gap-2">
           <span className="mt-0.5">✕</span>
           <span>
             {emptyAnswerErrors.length} question{emptyAnswerErrors.length !== 1 ? 's' : ''} (
@@ -157,6 +174,33 @@ export default function ExamEditorPanel({ examId, onSaved }) {
           />
           <label htmlFor="fitb_hint_enabled" className="text-sm text-gray-300 cursor-pointer select-none">
             Enable fill-in-the-blank answer suggestions (hint autocomplete visible to student while typing)
+          </label>
+        </div>
+        {/* Practical VM settings */}
+        <div className="md:col-span-2">
+          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider block mb-1">Practical VM Default URL</label>
+          <input
+            type="url"
+            name="practical_url"
+            value={form.practical_url || ''}
+            onChange={fieldChange}
+            placeholder="e.g. https://proxmox.local:8006"
+            className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 text-sm outline-none focus:border-indigo-500"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            URL automatically loaded in the Practical VM popup window for students. Leave blank to open the popup without a pre-loaded page.
+          </p>
+        </div>
+        <div className="md:col-span-2 flex items-center gap-3">
+          <input
+            type="checkbox"
+            id="allow_url_bar"
+            checked={form.allow_url_bar !== false}
+            onChange={(e) => setForm((f) => ({ ...f, allow_url_bar: e.target.checked }))}
+            className="w-4 h-4 rounded border-gray-600 accent-indigo-500 cursor-pointer"
+          />
+          <label htmlFor="allow_url_bar" className="text-sm text-gray-300 cursor-pointer select-none">
+            Show URL bar in Practical VM popup (allow student to navigate to other pages)
           </label>
         </div>
       </div>
@@ -210,7 +254,7 @@ function Field({ label, name, value, onChange, type = 'text', required, placehol
   );
 }
 
-const Q_TYPES = ['mcq', 'true_false', 'fill_blank', 'short_answer'];
+const Q_TYPES = ['mcq', 'true_false', 'fill_blank', 'short_answer', 'practical_vm'];
 
 function QModal({ qForm, setQForm, onSave, onCancel }) {
   function upd(k, v) {
@@ -228,7 +272,7 @@ function QModal({ qForm, setQForm, onSave, onCancel }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-xl border border-gray-700 shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-4">
+      <div className="bg-gray-900 rounded-xl border border-gray-700 shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-4">
         <h3 className="font-bold text-gray-100 text-base">Question Editor</h3>
 
         <div className="flex gap-4 flex-wrap">
@@ -267,19 +311,25 @@ function QModal({ qForm, setQForm, onSave, onCancel }) {
 
         <div>
           <label className="text-xs font-semibold uppercase tracking-wider block mb-1">
-            <span className={!qForm.answer_key && qForm.type !== 'short_answer' ? "text-red-400" : "text-gray-400"}>
-              {qForm.type === 'short_answer' ? 'Marking Rubric / Guidance (optional)' : 'Answer Key'}
+            <span className={!qForm.answer_key && qForm.type !== 'short_answer' && qForm.type !== 'practical_vm' ? "text-red-400" : "text-gray-400"}>
+              {qForm.type === 'short_answer' ? 'Marking Rubric / Guidance (optional)' :
+               qForm.type === 'practical_vm' ? 'Task Info' : 'Answer Key'}
             </span>
-            {qForm.type !== 'short_answer' && (!qForm.answer_key || !String(qForm.answer_key).trim()) && (
+            {qForm.type !== 'short_answer' && qForm.type !== 'practical_vm' && (!qForm.answer_key || !String(qForm.answer_key).trim()) && (
               <span className="ml-1 text-red-500 text-xs font-bold">* Required</span>
             )}
           </label>
-          {qForm.type === 'short_answer' ? (
+          {qForm.type === 'practical_vm' ? (
+            <div className="bg-indigo-950 border border-indigo-700 text-indigo-300 rounded-lg px-4 py-3 text-sm">
+              <p className="font-semibold mb-1">Practical VM Task</p>
+              <p className="text-indigo-400 text-xs">Students will access the Proxmox console using the exam credentials, perform the task described above, then take a full-screen screenshot as proof of completion. Marks are assigned manually by the instructor in the Review panel.</p>
+            </div>
+          ) : qForm.type === 'short_answer' ? (
             <>
               <textarea rows={2} value={qForm.answer_key || ''} onChange={(e) => upd('answer_key', e.target.value)}
                 placeholder="e.g. Award full marks if student correctly explains the concept…"
                 className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 text-sm outline-none focus:border-indigo-500 resize-none" />
-              <p className="text-xs text-indigo-400 mt-1">📝 Student types an answer. An optional screenshot upload is also available to the student.</p>
+              <p className="text-xs text-indigo-400 mt-1">📝 Student will type their answer. Marks are assigned manually by the instructor in the Review panel.</p>
             </>
           ) : qForm.type === 'true_false' ? (
             <select value={qForm.answer_key} onChange={(e) => upd('answer_key', e.target.value)}
@@ -301,7 +351,7 @@ function QModal({ qForm, setQForm, onSave, onCancel }) {
                   : 'border-gray-700'
               }`} />
           )}
-          {qForm.type !== 'short_answer_screenshot' && qForm.type !== 'short_answer' && (!qForm.answer_key || !String(qForm.answer_key).trim()) && (
+          {qForm.type !== 'short_answer_screenshot' && qForm.type !== 'short_answer' && qForm.type !== 'practical_vm' && (!qForm.answer_key || !String(qForm.answer_key).trim()) && (
             <p className="text-red-400 text-xs mt-1">⚠ Answer key is required — this question will block saving.</p>
           )}
         </div>

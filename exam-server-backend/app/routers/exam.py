@@ -61,6 +61,8 @@ async def start_exam(body: StartExamRequest, request: Request, user: dict = Depe
             total_marks=exam["total_marks"],
             questions=questions,
             fitb_hint_enabled=fitb_enabled,
+            practical_url=exam.get("practical_url", "") or "",
+            allow_url_bar=bool(exam.get("allow_url_bar", 1)),
         )
 
     session_id = await db.create_session(body.exam_id, user["id"])
@@ -80,6 +82,8 @@ async def start_exam(body: StartExamRequest, request: Request, user: dict = Depe
         total_marks=exam["total_marks"],
         questions=questions,
         fitb_hint_enabled=fitb_enabled,
+        practical_url=exam.get("practical_url", "") or "",
+        allow_url_bar=bool(exam.get("allow_url_bar", 1)),
     )
 
 

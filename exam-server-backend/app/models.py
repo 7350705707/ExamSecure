@@ -42,6 +42,8 @@ class CreateExamRequest(BaseModel):
     total_marks: int = 100
     questions: list[Question] = []
     fitb_hint_enabled: bool = False
+    practical_url: str = ""
+    allow_url_bar: bool = True
 
 class UpdateExamRequest(BaseModel):
     title: Optional[str] = None
@@ -51,6 +53,8 @@ class UpdateExamRequest(BaseModel):
     total_marks: Optional[int] = None
     questions: Optional[list[Question]] = None
     fitb_hint_enabled: Optional[bool] = None
+    practical_url: Optional[str] = None
+    allow_url_bar: Optional[bool] = None
 
 class ExamSummary(BaseModel):
     id: int
@@ -86,6 +90,8 @@ class StartExamResponse(BaseModel):
     total_marks: int
     questions: list[StudentQuestion]
     fitb_hint_enabled: bool = False
+    practical_url: str = ""
+    allow_url_bar: bool = True
 
 class AnswerItem(BaseModel):
     question_id: str

@@ -664,6 +664,223 @@ html, body {
   flex-direction: column;
   gap: 0.75rem;
 }
+
+/* ── Practical VM task ───────────────────────────────────────────────────── */
+.q-vm-task {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+.vm-cred-box {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+.vm-cred-heading {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+}
+.vm-cred-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  font-size: 0.88rem;
+}
+.vm-cred-lbl {
+  color: #64748b;
+  width: 80px;
+  flex-shrink: 0;
+}
+.vm-cred-val {
+  background: #0f172a;
+  color: #f1f5f9;
+  font-family: monospace;
+  font-size: 0.88rem;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid #334155;
+  user-select: all;
+}
+.vm-cred-reveal {
+  background: transparent;
+  border: 1px solid #475569;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 4px;
+}
+.vm-cred-reveal:hover { background: #334155; color: #f1f5f9; }
+.vm-action-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.vm-btn-open {
+  background: #4f46e5;
+  color: #fff;
+  border: none;
+  padding: 0.6rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.vm-btn-open:hover { background: #4338ca; }
+.vm-btn-capture {
+  background: #0e7490;
+  color: #fff;
+  border: none;
+  padding: 0.6rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.vm-btn-capture:hover { background: #155e75; }
+.vm-btn-capture:disabled { opacity: 0.55; cursor: not-allowed; }
+.vm-status {
+  font-size: 0.82rem;
+  color: #64748b;
+  font-style: italic;
+  padding: 0.4rem 0;
+}
+.vm-status-ok { color: #16a34a; font-style: normal; font-weight: 600; }
+.vm-status-err { color: #dc2626; font-style: normal; }
+.vm-instructions {
+  font-size: 0.83rem;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.5;
+}
+.vm-instructions strong { color: #e2e8f0; }
+.vm-btn-open-browser {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #4f46e5;
+  color: #fff;
+  border: none;
+  padding: 10px 22px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.vm-btn-open-browser:hover { background: #4338ca; }
+.vm-btn-open-browser:active { background: #3730a3; }
+
+.vm-gallery-wrap {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.vm-gallery-heading {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #94a3b8;
+  margin: 0 0 8px;
+}
+.vm-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vm-gallery-empty {
+  font-size: 0.8rem;
+  color: #475569;
+  font-style: italic;
+  margin: 0;
+}
+.vm-gallery-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 7px 12px;
+}
+.vm-gallery-num {
+  color: #6366f1;
+  font-weight: 700;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.vm-gallery-fname {
+  flex: 1;
+  color: #94a3b8;
+  font-family: monospace;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vm-gallery-del {
+  background: transparent;
+  border: 1px solid #475569;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 0.8rem;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.vm-gallery-del:hover { background: #dc2626; border-color: #dc2626; color: #fff; }
+
+/* ── Proxmox Full-Screen Overlay ─────────────────────────────────────────── */
+.proxmox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9900;
+  display: flex;
+  flex-direction: column;
+  background: #020617;
+}
+.proxmox-overlay.hidden { display: none; }
+.proxmox-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #1e293b;
+  border-bottom: 2px solid #4f46e5;
+  flex-shrink: 0;
+}
+.proxmox-overlay-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+.proxmox-close-btn {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.proxmox-close-btn:hover { background: #b91c1c; }
 .screenshot-upload-area {
   border: 2px dashed var(--border);
   border-radius: 8px;
