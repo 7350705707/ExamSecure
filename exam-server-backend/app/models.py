@@ -1,6 +1,7 @@
 """Pydantic request / response models."""
+import uuid
 from typing import Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -23,13 +24,19 @@ class TokenResponse(BaseModel):
 # ── Question ──────────────────────────────────────────────────────────────────
 
 class Question(BaseModel):
-    id: str
-    type: str  # mcq | true_false | fill_blank | short_answer
+    id: str = ""
+    type: str  # mcq | true_false | fill_blank | short_answer | practical_vm
     text: str
     options: Optional[list[str]] = None   # MCQ only
     marks: int = 1
     answer_key: Optional[str] = None      # stripped before sending to student
     rubric: Optional[str] = None          # short_answer grading hints
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def ensure_id(cls, v: Any) -> str:
+        """Auto-generate a UUID when id is absent or empty."""
+        return str(v) if v else str(uuid.uuid4())
 
 
 # ── Exams (admin) ─────────────────────────────────────────────────────────────

@@ -261,8 +261,9 @@ export default function UploadPanel({ onSaved }) {
   }
 
   function saveQuestion(idx, q) {
-    if (idx === 'new') setParsed(prev => [...prev, q]);
-    else setParsed(prev => prev.map((item, i) => i === idx ? q : item));
+    const saved = { ...q, id: q.id || crypto.randomUUID() };
+    if (idx === 'new') setParsed(prev => [...prev, saved]);
+    else setParsed(prev => prev.map((item, i) => i === idx ? saved : item));
     setEditingIdx(null);
   }
 
@@ -297,7 +298,7 @@ export default function UploadPanel({ onSaved }) {
     }
   }
 
-  const newTemplate = { type: 'mcq', text: '', marks: 1, options: ['', '', '', ''], answer_key: '' };
+  const newTemplate = { id: '', type: 'mcq', text: '', marks: 1, options: ['', '', '', ''], answer_key: '' };
   return (
     <div className="flex-1 flex flex-col gap-5 p-6 overflow-y-auto">
       <div>
